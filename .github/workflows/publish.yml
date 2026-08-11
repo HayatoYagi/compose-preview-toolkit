@@ -17,6 +17,21 @@ on:
         required: true
       GPG_PASSPHRASE:
         required: true
+  workflow_dispatch:
+    inputs:
+      target:
+        description: >-
+          What to (re-)publish. Both destinations are independent releases (Gradle Plugin
+          Portal rejects re-publishing a version that already succeeded there), so a partial
+          failure needs to retry only the side that actually failed.
+        type: choice
+        required: true
+        default: 'both'
+        options: ['both', 'plugin-portal', 'maven-central']
+      ref:
+        description: 'Tag or ref to publish (defaults to the latest tag if left blank).'
+        required: false
+        default: ''
 
 jobs:
   publish:
@@ -24,6 +39,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
 
       - name: Set up JDK
         uses: actions/setup-java@v4
@@ -36,6 +53,7 @@ jobs:
 
       # Gradle Plugin Portal: the gradle-plugin module itself.
       - name: Publish plugin to Gradle Plugin Portal
+        if: github.event_name != 'workflow_dispatch' || inputs.target == 'both' || inputs.target == 'plugin-portal'
         env:
           GRADLE_PUBLISH_KEY: ${{ secrets.GRADLE_PUBLISH_KEY }}
           GRADLE_PUBLISH_SECRET: ${{ secrets.GRADLE_PUBLISH_SECRET }}
@@ -43,13 +61,19 @@ jobs:
 
       # Maven Central (Central Portal): the annotations & ksp-processor libraries the plugin
       # references at runtime.
+      #
+      # --no-configuration-cache: vanniktech-maven-publish's Central Portal repository object
+      # doesn't serialize cleanly under Gradle's configuration cache (enabled by default via
+      # this repo's gradle.properties) — fails with "Services of type BuildFeatures are not
+      # available for injection into instances of type BuildService."
       - name: Publish annotations & ksp-processor to Maven Central
+        if: github.event_name != 'workflow_dispatch' || inputs.target == 'both' || inputs.target == 'maven-central'
         env:
           ORG_GRADLE_PROJECT_mavenCentralUsername: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
           ORG_GRADLE_PROJECT_mavenCentralPassword: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}
           ORG_GRADLE_PROJECT_signingInMemoryKey: ${{ secrets.GPG_PRIVATE_KEY }}
           ORG_GRADLE_PROJECT_signingInMemoryKeyPassword: ${{ secrets.GPG_PASSPHRASE }}
         run: |
-          ./gradlew \
+          ./gradlew --no-configuration-cache \
             :annotations:publishAllPublicationsToMavenCentralRepository \
             :ksp-processor:publishAllPublicationsToMavenCentralRepository
