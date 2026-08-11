@@ -7,20 +7,30 @@ A Gradle plugin that turns a single marker annotation on your Jetpack Compose `@
 functions into AGP's official [Compose Preview Screenshot Testing](https://developer.android.com/studio/preview/compose-screenshot-testing)
 wrappers — no hand-duplicated `@PreviewTest` functions in `androidTest`/`screenshotTest`.
 
-```diff
-  // src/main/kotlin/.../GreetingScreen.kt
-+ @ScreenshotPreview
-  @Preview
-  @Composable
-  fun GreetingPreview() { GreetingScreen(name = "Android") }
+**Before** — two functions in two files, kept in sync by hand:
+
+```kotlin
+// src/main/kotlin/.../GreetingScreen.kt — for Android Studio's Preview panel
+@Preview
+@Composable
+fun GreetingPreview() { GreetingScreen(name = "Android") }
 ```
 
-```diff
-- // src/screenshotTest/kotlin/.../GreetingScreenshotTest.kt — delete this whole file
-- @PreviewTest
-- @Preview
-- @Composable
-- fun GreetingPreview() { GreetingScreen(name = "Android") }
+```kotlin
+// src/screenshotTest/kotlin/.../GreetingScreenshotTest.kt — a second copy you write and maintain
+@PreviewTest
+@Preview
+@Composable
+fun GreetingPreview() { GreetingScreen(name = "Android") }
+```
+
+**After** — one function, one file:
+
+```kotlin
+// src/main/kotlin/.../GreetingScreen.kt
+@ScreenshotPreview
+@Composable
+fun GreetingPreview() { GreetingScreen(name = "Android") }
 ```
 
 ## Overview
