@@ -137,20 +137,7 @@ the plugin exactly like a real consumer (`id("io.github.hayatoyagi.compose-previ
 version "<version>"`), and that version is always ahead of whatever's actually published while
 this repo is under active development.
 
-### Local development
-
-From the repo root, publish the current in-progress version to your local Maven cache, then
-build/run `sample` as its own project:
-
-```
-./gradlew :annotations:publishToMavenLocal :ksp-processor:publishToMavenLocal :gradle-plugin:publishToMavenLocal
-cd sample
-./gradlew updateDebugScreenshotTest
-./gradlew validateDebugScreenshotTest
-```
-
-Re-run the `publishToMavenLocal` step after any change to `annotations`, `ksp-processor`, or
-`gradle-plugin` to pick it up in `sample`.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for local development setup and the release process.
 
 ## Known limitations
 
