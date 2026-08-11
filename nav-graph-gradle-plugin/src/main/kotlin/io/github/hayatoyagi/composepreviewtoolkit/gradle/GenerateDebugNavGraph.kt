@@ -16,10 +16,10 @@ import org.gradle.api.tasks.PathSensitivity
 import org.gradle.api.tasks.TaskAction
 
 /**
- * Runs Step A of the Phase 2 nav-graph design (see `nav-graph-psi-analyzer`'s [NavNodeScanner])
- * over a module's own `src/main/kotlin` sources and writes the resulting node index. This is
- * intentionally module-local: a module only sees `entry<X> {}` registrations written inside its
- * own sources, not those of modules it depends on — cross-module aggregation is a later PR's job.
+ * Runs [NavNodeScanner] over a module's own `src/main/kotlin` sources and writes the resulting
+ * node index. This is intentionally module-local: a module only sees `entry<X> {}` registrations
+ * written inside its own sources, not those of modules it depends on — combining node indexes
+ * across multiple modules into one graph happens in [GenerateDebugNavGraphSite].
  *
  * Deterministic given its declared inputs (source files, `entryFunctionNames`), so this is safe to
  * cache, matching `GenerateScreenshotPreviewTests`'s reasoning in the Phase 1 plugin.
