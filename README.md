@@ -71,7 +71,7 @@ plugins {
 
 The plugin applies `com.android.compose.screenshot` and `com.google.devtools.ksp` for you, and
 by default adds `io.github.hayatoyagi:compose-preview-toolkit-annotations` so
-`@ScreenshotPreview`/`@PreviewSet` are available.
+`@ScreenshotPreview` is available.
 
 ## Quick Start
 
@@ -97,17 +97,20 @@ internal object GreetingScreenPreviews {
 ### `@ScreenshotPreview`
 
 Marks a parameterless `@Composable` preview function for screenshot-test generation. Works on
-top-level functions or functions nested directly inside a Kotlin `object`.
+top-level functions or functions nested directly inside a Kotlin `object`. This is the only
+thing that decides which functions get a screenshot test — it has nothing to do with how they
+render (see below).
 
-### `@PreviewSet`
+### Configuring what gets rendered
 
-Optional bundled light/dark multi-preview annotation, stacked by default on every generated
-wrapper. Bring your own instead via the plugin extension:
+Every generated wrapper gets a plain `androidx.compose.ui.tooling.preview.Preview` (a single
+default render) unless you configure `extraPreviewAnnotationFqn` to point at your own multi-preview
+annotation — e.g. a light/dark pair:
 
 ```kotlin
 composePreviewToolkit {
-    annotationFqn.set("com.example.app.ScreenshotPreview")           // use your own marker
-    extraPreviewAnnotationFqn.set("com.example.app.LightDarkPreview") // use your own multi-preview
+    annotationFqn.set("com.example.app.ScreenshotPreview")           // use your own marker instead of @ScreenshotPreview
+    extraPreviewAnnotationFqn.set("com.example.app.LightDarkPreview") // stack your own multi-preview annotation instead
 }
 ```
 
