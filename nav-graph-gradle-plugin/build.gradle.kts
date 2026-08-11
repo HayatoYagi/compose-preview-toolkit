@@ -35,16 +35,31 @@ dependencies {
     // KNOWN LIMITATION: this transitively pulls in kotlin-compiler-embeddable (nav-graph-psi-
     // analyzer exposes it via api(...), since its public API returns KtFile/KtCallExpression
     // types from it), which becomes part of the classpath of any consumer applying this plugin.
-    // Confirmed by building compose-preview-toolkit-sample's :app/:feature-a/:feature-b (which
-    // apply this plugin alongside AGP's built-in Kotlin support): Kotlin's Gradle plugin emits a
+    // Building compose-preview-toolkit-sample's :app/:feature-a/:feature-b (which apply this
+    // plugin alongside AGP's built-in Kotlin support) confirms Kotlin's Gradle plugin emits a
     // "'kotlin-compiler-embeddable' Artifact Present in Build Classpath ... along Kotlin Gradle
     // plugin" warning (https://kotl.in/gradle/internal-compiler-symbols) at configuration time.
-    // In practice, real compilation (compileDebugKotlin) still succeeds — no miscompilation
-    // observed — so this is being accepted as a warning-only known limitation for this PR rather
-    // than attempting classloader isolation/shading, which is a materially larger task. See the
-    // matching note on kotlin-compiler-embeddable in the root gradle/libs.versions.toml.
+    // Real compilation (compileDebugKotlin) still succeeds — no miscompilation observed — so this
+    // is accepted as a warning-only known limitation rather than attempting classloader
+    // isolation/shading, which is a materially larger task. See the matching note on
+    // kotlin-compiler-embeddable in the root gradle/libs.versions.toml.
     implementation(project(":nav-graph-psi-analyzer"))
+
+    // Compile-time dependency purely to reuse ScreenshotPreviewProcessorProvider.DEFAULT_INDEX_FILE_NAME
+    // (the "ComposePreviewToolkitScreenshotIndex" base name) when globbing a graph module's KSP
+    // output resources for site generation — the same reasoning gradle-plugin's own build.gradle.kts
+    // gives for its own dependency on this module, applied here cross-plugin instead of
+    // cross-processor.
+    implementation(project(":ksp-processor"))
 
     testImplementation(gradleTestKit())
     testImplementation(kotlin("test"))
+
+    testImplementation(platform("org.junit:junit-bom:${libs.versions.junit.get()}"))
+    testImplementation(libs.junit.jupiter)
+    testRuntimeOnly("org.junit.platform:junit-platform-launcher")
+}
+
+tasks.test {
+    useJUnitPlatform()
 }

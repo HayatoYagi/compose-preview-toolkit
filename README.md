@@ -144,7 +144,7 @@ See [.github/actions/update-validate-screenshot-tests/README.md](.github/actions
 for requirements and a full workflow example, or [action.yml](.github/actions/update-validate-screenshot-tests/action.yml)
 for every input.
 
-## Nav Graph (experimental, node extraction only)
+## Nav Graph (experimental, no edges yet)
 
 A **separate** plugin id, `io.github.hayatoyagi.compose-preview-toolkit.navgraph` — deliberately
 not bundled into the plugin above, since it pulls in a heavy embedded-Kotlin-compiler dependency
@@ -164,11 +164,41 @@ plugins {
 ```
 
 writes `build/generated/composePreviewToolkit/navGraph/debug/ComposePreviewToolkitNavNodeIndex.txt`
-(tab-separated `packageName\tsimpleName\tqualifiedName`), scoped to that module's own sources only
-— see `sample/feature-a`/`sample/feature-b` for a worked example, and `docs/ROADMAP.md` for what's
-still to come (edge detection, cross-module aggregation, the screenshot-paired site). Configure via
-the `composePreviewToolkitNavGraph { ... }` extension (currently just `entryFunctionNames`, in case
-your codebase uses a differently-named `entry`-shaped registration function).
+(tab-separated `packageName\tsimpleName\tqualifiedName`), scoped to that module's own sources only.
+Configure via the `composePreviewToolkitNavGraph { ... }` extension's `entryFunctionNames`, in case
+your codebase uses a differently-named `entry`-shaped registration function.
+
+### Gallery site (nodes + screenshots, no edges yet)
+
+On an "aggregator" module (typically your app module, the one that actually wires every feature's
+routes into its own `NavDisplay`), configure `graphModules` with every project path that
+contributes to the graph, then run `generateDebugNavGraphSite`:
+
+```kotlin
+// app module's build.gradle.kts
+composePreviewToolkitNavGraph {
+    graphModules.set(setOf(":app", ":feature-a", ":feature-b"))
+}
+```
+
+```
+./gradlew :app:generateDebugNavGraphSite
+```
+
+This aggregates each `graphModules` project's own node index and (if that project also applies the
+Phase 1 plugin above) its `ComposePreviewToolkitScreenshotIndex*.txt` + `src/screenshotTestDebug/reference/**/*.png`
+baselines, real Gradle cross-project task dependencies included — running the aggregator's task
+alone is enough to trigger every graph module's own `generateDebugNavGraph`/`kspDebugKotlin` first,
+no manual ordering required. Each node is best-effort paired with a screenshot thumbnail by a
+naming heuristic: strip a configurable suffix (`routeNameSuffixesToStrip`, default
+`["Destination", "Route"]`) from the route's simple name, then case-insensitively substring-match
+the remainder against the screenshot wrapper name. Unmatched routes render as thumbnail-less
+cards — not an error, the expected outcome for most routes.
+
+Output is a single self-contained `build/composePreviewToolkit/navGraphSite/debug/index.html`
+(thumbnails embedded as base64 data URIs, no separate PNG files to keep in sync) — a thumbnail
+gallery, not yet a graph diagram; edge detection and Mermaid rendering are still to come, see
+`docs/ROADMAP.md`. See `sample/app`/`sample/feature-a`/`sample/feature-b` for a worked example.
 
 ## Sample App
 
@@ -180,8 +210,13 @@ version "<version>"`), and that version is always ahead of whatever's actually p
 this repo is under active development.
 
 `sample/app` is a small Navigation3 app wiring together `sample/feature-a` and `sample/feature-b`
-(each a separate feature module), demonstrating the nav-graph plugin's node extraction (see "Nav
-Graph" above) alongside Phase 1's screenshot-test generation.
+(each a separate feature module), demonstrating the nav-graph plugin's node extraction and gallery
+site generation (see "Nav Graph" above) alongside Phase 1's screenshot-test generation. Only
+`sample/app` applies the Phase 1 screenshot-testing plugin — `feature-a`/`feature-b` only apply the
+navgraph plugin — so in the generated gallery, `FeatureARoute`/`FeatureBRoute` are always
+thumbnail-less, and `HomeRoute` is too, since nothing in `sample/app`'s only screenshot
+(`GreetingScreenPreview`, paired with the unrelated `GreetingScreen` composable) matches the
+`"Home"` naming heuristic.
 
 ## Known limitations
 
@@ -194,10 +229,12 @@ Graph" above) alongside Phase 1's screenshot-test generation.
 - **Navigation graph + screenshot site (in progress)**: statically extract a Navigation3 nav
   graph and pair each screen node with its generated screenshot baseline, publishing a static
   site to GitHub Pages for quick visual review of the whole app's navigation flow. Node
-  extraction (`io.github.hayatoyagi.compose-preview-toolkit.navgraph` plugin, `nav-graph-psi-analyzer`,
-  the `generateDebugNavGraph` task) is available now — see `sample/feature-a`/`sample/feature-b`.
-  Edge detection, cross-module aggregation, and the site itself are not yet implemented; see
-  `docs/ROADMAP.md` for the full design and PR sequence.
+  extraction, cross-module aggregation, and the thumbnail-gallery site
+  (`io.github.hayatoyagi.compose-preview-toolkit.navgraph` plugin, `nav-graph-psi-analyzer`, the
+  `generateDebugNavGraph`/`generateDebugNavGraphSite` tasks) are available now — see "Nav Graph"
+  above and `sample/app`/`sample/feature-a`/`sample/feature-b`. Edge detection and Mermaid graph
+  rendering (turning the gallery into an actual graph diagram) are not yet implemented, nor is the
+  GitHub Pages deploy action itself; see `docs/ROADMAP.md` for the full design and PR sequence.
 
 ## Contributing
 

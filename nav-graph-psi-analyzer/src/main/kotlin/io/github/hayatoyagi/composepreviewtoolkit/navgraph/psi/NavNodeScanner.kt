@@ -11,27 +11,24 @@ import org.jetbrains.kotlin.psi.KtUserType
 val DEFAULT_ENTRY_FUNCTION_NAMES = setOf("entry")
 
 /**
- * Step A of the Phase 2 nav-graph design: scans a set of already-parsed [KtFile]s for Navigation3
- * route registrations shaped like `entry<Route> { ... }`, and produces one [NavNode] per unique
- * route found.
+ * Scans a set of already-parsed [KtFile]s for Navigation3 route registrations shaped like
+ * `entry<Route> { ... }`, and produces one [NavNode] per unique route found.
  *
  * This is intentionally a *syntactic* (no type resolution) scan: a [KtCallExpression] counts as an
  * entry registration when its callee simple name is in [entryFunctionNames], it has exactly one
  * type argument, and it has a trailing lambda argument — matching Nav3's
  * `fun <T : NavKey> EntryProviderScope<NavKey>.entry(...) { ... }` call shape. Because `entry<T>`'s
- * type bound already guarantees `T : NavKey` at compile time (see the Phase 2 design doc's "設計
- * 方針の訂正"), independently verifying that the resolved type is a NavKey implementation is not
- * necessary here.
+ * type bound already guarantees `T : NavKey` at compile time, independently verifying that the
+ * resolved type is a NavKey implementation is not necessary here.
  *
  * The type argument's declaration is resolved by simple-name + package match against the supplied
- * [KtFile]s (deliberately text-based, not full semantic resolution — consistent with the rest of
- * the Phase 2 design). Routes nested inside a `sealed interface`/`sealed class` (Nav3's common
- * pattern) are supported: the type argument is written as a dotted chain (e.g.
- * `ParentRoute.Detail`), and the resulting [NavNode.qualifiedName] reflects the real nesting the
- * same way `KSClassDeclaration.qualifiedName` would report it.
+ * [KtFile]s (deliberately text-based, not full semantic resolution). Routes nested inside a
+ * `sealed interface`/`sealed class` (Nav3's common pattern) are supported: the type argument is
+ * written as a dotted chain (e.g. `ParentRoute.Detail`), and the resulting [NavNode.qualifiedName]
+ * reflects the real nesting the same way `KSClassDeclaration.qualifiedName` would report it.
  *
- * Step B/C (call-graph construction, edge/reachability detection) are explicitly out of scope for
- * this scanner — see the Phase 2 design doc's PR sequence.
+ * Call-graph construction and edge/reachability detection between routes are not performed by
+ * this scanner, which only extracts nodes.
  */
 class NavNodeScanner(
     private val entryFunctionNames: Set<String> = DEFAULT_ENTRY_FUNCTION_NAMES,
