@@ -7,6 +7,19 @@ A Gradle plugin that turns a single marker annotation on your Jetpack Compose `@
 functions into AGP's official [Compose Preview Screenshot Testing](https://developer.android.com/studio/preview/compose-screenshot-testing)
 wrappers — no hand-duplicated `@PreviewTest` functions in `androidTest`/`screenshotTest`.
 
+```kotlin
+// Before: a second, hand-maintained copy under src/screenshotTest
+@PreviewTest
+@Preview
+@Composable
+fun GreetingPreview() { GreetingScreen(name = "Android") }
+
+// After: one annotation in src/main, nothing else to write or keep in sync
+@ScreenshotPreview
+@Composable
+fun GreetingPreview() { GreetingScreen(name = "Android") }
+```
+
 ## Overview
 
 - Write `@ScreenshotPreview` next to your `@Preview` composable in `src/main` — that's it.
@@ -18,34 +31,20 @@ wrappers — no hand-duplicated `@PreviewTest` functions in `androidTest`/`scree
 - A reusable composite GitHub Action (`.github/actions/update-validate-screenshot-tests`) wraps
   the CI-side "update baselines, commit if changed, then validate" flow for you.
 
-## Motivation
+## Requirements
 
-**Before** — the official workflow requires a second, hand-maintained copy of every preview you
-want screenshot-tested:
+Tested with:
 
-```kotlin
-// src/main/kotlin/.../GreetingScreen.kt
-@Preview
-@Composable
-fun GreetingPreview() { GreetingScreen(name = "Android") }
-```
+- Gradle 9.6+
+- Android Gradle Plugin (AGP) 9.2.1+ — specifically its built-in Kotlin support (see
+  Installation below) and `com.android.compose.screenshot` 0.0.1-alpha15, which this plugin
+  applies for you.
+- Kotlin 2.4.0+ / KSP 2.3.9+
 
-```kotlin
-// src/screenshotTest/kotlin/.../GreetingScreenshotTest.kt  (you write and maintain this too)
-@PreviewTest
-@Preview
-@Composable
-fun GreetingPreview() { GreetingScreen(name = "Android") }
-```
-
-**After** — one annotation, nothing to add under `screenshotTest`:
-
-```kotlin
-// src/main/kotlin/.../GreetingScreen.kt
-@ScreenshotPreview
-@Composable
-fun GreetingPreview() { GreetingScreen(name = "Android") }
-```
+Untested on older AGP/Gradle combinations. This plugin wires generated sources into AGP's
+`screenshotTest` source set via reflection (see `ComposePreviewToolkitPlugin.kt`) because AGP
+doesn't yet expose a stable API for it, so behavior on versions outside the above isn't
+guaranteed.
 
 ## Installation
 
@@ -93,7 +92,7 @@ internal object GreetingScreenPreviews {
 }
 ```
 
-## Features
+## Configuration
 
 ### `@ScreenshotPreview`
 
@@ -115,6 +114,9 @@ composePreviewToolkit {
 }
 ```
 
+See `ComposePreviewToolkitExtension.kt` for every available property, including overriding the
+`compose`/`screenshot-validation-api` versions this plugin adds.
+
 ### Composite GitHub Action
 
 ```yaml
@@ -123,7 +125,9 @@ composePreviewToolkit {
     github-token: ${{ secrets.GITHUB_TOKEN }}
 ```
 
-See [action.yml](.github/actions/update-validate-screenshot-tests/action.yml) for all inputs.
+See [.github/actions/update-validate-screenshot-tests/README.md](.github/actions/update-validate-screenshot-tests/README.md)
+for requirements and a full workflow example, or [action.yml](.github/actions/update-validate-screenshot-tests/action.yml)
+for every input.
 
 ## Sample App
 
@@ -133,8 +137,6 @@ the root build — see the comment at the top of `sample/settings.gradle.kts` fo
 the plugin exactly like a real consumer (`id("io.github.hayatoyagi.compose-preview-toolkit")
 version "<version>"`), and that version is always ahead of whatever's actually published while
 this repo is under active development.
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) for local development setup and the release process.
 
 ## Known limitations
 
@@ -149,6 +151,11 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for local development setup and the relea
   best-effort scanning of `navigate(...)` call sites), pair each screen node with its generated
   screenshot baseline, and publish a static site to GitHub Pages for quick visual review of the
   whole app's navigation flow.
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for local development setup, how a PR gets validated, and
+the release process.
 
 ## License
 
