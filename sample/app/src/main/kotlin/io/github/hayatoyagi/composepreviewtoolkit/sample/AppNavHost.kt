@@ -18,7 +18,13 @@ object HomeRoute : NavKey
  * App-level Nav3 host. Mirrors medimo-android's real wiring shape (see the Phase 2 design doc's
  * Context section): the `navigateTo(FeatureBRoute)` call for feature-a's "proceed" action is
  * written *here*, at the app level, passed into [featureANavEntries] as the `onProceedClick`
- * callback argument — not inside feature-a's own `entry<FeatureARoute> {}` block.
+ * callback argument — not inside feature-a's own `entry<FeatureARoute> {}` block. This is pattern
+ * (i) of the two navigation-wiring shapes the nav-graph edge detector supports.
+ *
+ * [featureBNavEntries] is passed [navigateTo] itself (not a single-purpose callback like
+ * `onProceedClick`) — its own `entry<FeatureBRoute> {}` block calls `navigateTo(FeatureARoute)`
+ * directly, inside `feature-b`'s own source, demonstrating pattern (ii): see
+ * `FeatureBNavEntries.kt`'s kdoc.
  *
  * `entry<T>` is not imported here — see `feature-a`'s `FeatureANavEntries.kt` kdoc for why: it's a
  * member function of `EntryProviderScope`, resolved via `entryProvider {}`'s own receiver.
@@ -36,7 +42,7 @@ fun AppNavHost() {
                 HomeScreen(onGoToFeatureAClick = { navigateTo(FeatureARoute) })
             }
             featureANavEntries(onProceedClick = { navigateTo(FeatureBRoute) })
-            featureBNavEntries()
+            featureBNavEntries(navigateTo = navigateTo)
         },
     )
 }
