@@ -102,8 +102,8 @@ import io.github.hayatoyagi.composepreviewtoolkit.annotations.ScreenshotPreview
 @Preview
 @ScreenshotPreview
 @Composable
-internal fun GreetingScreenPreview() {
-    MaterialTheme { GreetingScreen(name = "compose-preview-toolkit") }
+internal fun HomeScreenPreview() {
+    MaterialTheme { HomeScreen(onGoToFeatureAClick = {}) }
 }
 ```
 
@@ -214,9 +214,8 @@ this repo is under active development.
 site generation (see "Nav Graph" above) alongside Phase 1's screenshot-test generation. Only
 `sample/app` applies the Phase 1 screenshot-testing plugin — `feature-a`/`feature-b` only apply the
 navgraph plugin — so in the generated gallery, `FeatureARoute`/`FeatureBRoute` are always
-thumbnail-less, and `HomeRoute` is too, since nothing in `sample/app`'s only screenshot
-(`GreetingScreenPreview`, paired with the unrelated `GreetingScreen` composable) matches the
-`"Home"` naming heuristic.
+thumbnail-less, while `HomeRoute` gets a real thumbnail: its screen, `HomeScreen`, carries the
+`@ScreenshotPreview`-annotated `HomeScreenPreview`, and `"Home"` naming-matches it.
 
 ## Known limitations
 

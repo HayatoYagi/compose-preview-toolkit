@@ -2,8 +2,11 @@ package io.github.hayatoyagi.composepreviewtoolkit.sample
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -15,7 +18,7 @@ import androidx.compose.ui.unit.dp
 import io.github.hayatoyagi.composepreviewtoolkit.annotations.ScreenshotPreview
 
 @Composable
-fun GreetingScreen(name: String) {
+fun HomeScreen(onGoToFeatureAClick: () -> Unit) {
     Surface(modifier = Modifier.fillMaxSize()) {
         Column(
             modifier = Modifier
@@ -25,9 +28,13 @@ fun GreetingScreen(name: String) {
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             Text(
-                text = "Hello from $name!",
+                text = "Hello from compose-preview-toolkit!",
                 style = MaterialTheme.typography.headlineSmall,
             )
+            Spacer(modifier = Modifier.height(16.dp))
+            Button(onClick = onGoToFeatureAClick) {
+                Text("Go to Feature A")
+            }
         }
     }
 }
@@ -41,8 +48,8 @@ fun GreetingScreen(name: String) {
 @Preview
 @ScreenshotPreview
 @Composable
-internal fun GreetingScreenPreview() {
+internal fun HomeScreenPreview() {
     MaterialTheme {
-        GreetingScreen(name = "compose-preview-toolkit")
+        HomeScreen(onGoToFeatureAClick = {})
     }
 }
