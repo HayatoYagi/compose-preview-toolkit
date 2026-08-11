@@ -1,4 +1,4 @@
-package io.github.hayatoyagi.composepreviewtoolkit.annotations
+package io.github.hayatoyagi.composepreviewtoolkit.sample
 
 import androidx.compose.ui.tooling.preview.Preview
 
@@ -8,9 +8,10 @@ private const val LIGHT_BACKGROUND_COLOR: Long = 0xFFFFFFFF
 private const val DARK_BACKGROUND_COLOR: Long = 0xFF121212
 
 /**
- * Optional convenience: stacks a light/dark pair of `@Preview`s. Not required by
- * [ScreenshotPreview] or the Gradle plugin — stack your own preview annotation(s) on a
- * `@ScreenshotPreview` function instead if you don't want this module's opinionated styling.
+ * App-specific light/dark multi-preview annotation, configured as this app's
+ * `extraPreviewAnnotationFqn` (see build.gradle.kts) instead of relying on any bundled default
+ * from the toolkit — screenshot-preview-toolkit intentionally ships no opinionated styling of
+ * its own, so each app defines (and owns) something like this.
  */
 @Retention(AnnotationRetention.RUNTIME)
 @Target(AnnotationTarget.FUNCTION)
@@ -26,4 +27,4 @@ private const val DARK_BACKGROUND_COLOR: Long = 0xFF121212
     uiMode = UI_MODE_NIGHT_YES,
     backgroundColor = DARK_BACKGROUND_COLOR,
 )
-annotation class PreviewSet
+annotation class LightDarkPreview

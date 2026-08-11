@@ -2,7 +2,7 @@
 
 ## v1 — screenshot-test generation (this scaffold)
 
-- `annotations`: `@ScreenshotPreview` marker + optional `@PreviewSet` light/dark composite.
+- `annotations`: `@ScreenshotPreview` marker annotation.
 - `ksp-processor`: discovers `@ScreenshotPreview` functions, writes a per-module index resource.
 - `gradle-plugin`: generates AGP-official `@PreviewTest` wrappers from that index into the
   `debugScreenshotTest` source set; wires `updateDebugScreenshotTest` / `validateDebugScreenshotTest`;

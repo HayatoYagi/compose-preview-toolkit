@@ -28,7 +28,11 @@ inputs:
     required: false
     default: 'test: update screenshot baselines'
   reference-path-glob:
-    description: 'Pathspec matched against changed reference images. AGP''s default convention.'
+    description: >-
+      Glob matched against changed reference images, relative to working-directory. AGP's
+      default convention, "**/" included, matches both a module directly at working-directory
+      (zero parent segments before src/) and modules nested under it — no need to change this
+      per repo layout.
     required: false
     default: '**/src/screenshotTestDebug/reference/**'
   gradle-args:
@@ -61,8 +65,11 @@ runs:
         GITHUB_TOKEN: ${{ inputs.github-token }}
       run: |
         ./gradlew updateDebugScreenshotTest ${{ inputs.gradle-args }}
-        git add -- '${{ inputs.reference-path-glob }}'
-        if ! git diff --cached --quiet -- '${{ inputs.reference-path-glob }}'; then
+        # The ":(glob)" pathspec magic makes "**/" match zero-or-more directories regardless of
+        # the repo's core.globPathspecs setting (off by default) — without it, "**/foo" only
+        # matches foo under at least one parent directory, not foo at the pathspec root.
+        git add -- ':(glob)${{ inputs.reference-path-glob }}'
+        if ! git diff --cached --quiet -- ':(glob)${{ inputs.reference-path-glob }}'; then
           git config user.name "${{ inputs.git-user-name }}"
           git config user.email "${{ inputs.git-user-email }}"
           git commit -m "${{ inputs.commit-message }}"

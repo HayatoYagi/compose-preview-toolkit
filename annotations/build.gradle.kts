@@ -4,9 +4,11 @@ plugins {
     // No explicit Kotlin Android plugin: AGP 9's built-in Kotlin support handles it, and
     // applying org.jetbrains.kotlin.android alongside AGP 9 is now a hard error.
     alias(libs.plugins.androidLibrary)
-    alias(libs.plugins.composeCompiler)
     alias(libs.plugins.mavenPublish)
 }
+
+// @ScreenshotPreview is a plain Kotlin annotation with no Compose dependency at all, so this
+// module has no Compose Compiler plugin, no compose buildFeature, and no library dependencies.
 
 android {
     namespace = "io.github.hayatoyagi.composepreviewtoolkit.annotations"
@@ -15,14 +17,6 @@ android {
     defaultConfig {
         minSdk = libs.versions.android.minSdk.get().toInt()
     }
-
-    buildFeatures {
-        compose = true
-    }
-}
-
-dependencies {
-    implementation(libs.compose.ui.tooling.preview)
 }
 
 mavenPublishing {

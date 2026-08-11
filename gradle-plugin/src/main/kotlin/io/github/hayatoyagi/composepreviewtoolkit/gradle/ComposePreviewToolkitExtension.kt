@@ -15,16 +15,15 @@ abstract class ComposePreviewToolkitExtension {
     abstract val annotationFqn: Property<String>
 
     /**
-     * Fully-qualified name of a multi-preview annotation to stack on every generated
+     * Fully-qualified name of a `@Preview`-family annotation to stack on every generated
      * screenshot-test wrapper function, alongside AGP's official `@PreviewTest`.
      *
      * This drives what actually gets rendered: the wrapper is a fresh top-level function that
      * only calls your original `@Preview` function, so any `@Preview`s on the original are NOT
-     * inherited — the wrapper needs its own. Defaults to this toolkit's bundled
-     * `io.github.hayatoyagi.composepreviewtoolkit.annotations.PreviewSet` (a light/dark pair).
-     * Point this at your own composite `@Preview` annotation to use different render
-     * configurations, or to drop the dependency on the `compose-preview-toolkit-annotations`
-     * artifact.
+     * inherited — the wrapper needs its own. Defaults to the plain
+     * `androidx.compose.ui.tooling.preview.Preview` (a single default render, no styling
+     * opinions). Point this at your own composite multi-preview annotation (e.g. a light/dark
+     * pair) for different or multiple render configurations per wrapper.
      */
     abstract val extraPreviewAnnotationFqn: Property<String>
 
