@@ -24,10 +24,12 @@ fun GreetingPreview() { GreetingScreen(name = "Android") }
 fun GreetingPreview() { GreetingScreen(name = "Android") }
 ```
 
-**After** — one function, one file:
+**After** — one function, one file. `@Preview` stays for Android Studio's Preview panel; adding
+`@ScreenshotPreview` next to it is all that's needed for the screenshot test:
 
 ```kotlin
 // src/main/kotlin/.../GreetingScreen.kt
+@Preview
 @ScreenshotPreview
 @Composable
 fun GreetingPreview() { GreetingScreen(name = "Android") }
@@ -94,14 +96,14 @@ by default adds `io.github.hayatoyagi:compose-preview-toolkit-annotations` so
 4. Run `./gradlew validateDebugScreenshotTest` in CI to catch visual regressions.
 
 ```kotlin
+import androidx.compose.ui.tooling.preview.Preview
 import io.github.hayatoyagi.composepreviewtoolkit.annotations.ScreenshotPreview
 
-internal object GreetingScreenPreviews {
-    @ScreenshotPreview
-    @Composable
-    internal fun Default() {
-        MaterialTheme { GreetingScreen(name = "compose-preview-toolkit") }
-    }
+@Preview
+@ScreenshotPreview
+@Composable
+internal fun GreetingScreenPreview() {
+    MaterialTheme { GreetingScreen(name = "compose-preview-toolkit") }
 }
 ```
 
