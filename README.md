@@ -211,11 +211,20 @@ this repo is under active development.
 
 `sample/app` is a small Navigation3 app wiring together `sample/feature-a` and `sample/feature-b`
 (each a separate feature module), demonstrating the nav-graph plugin's node extraction and gallery
-site generation (see "Nav Graph" above) alongside Phase 1's screenshot-test generation. Only
-`sample/app` applies the Phase 1 screenshot-testing plugin — `feature-a`/`feature-b` only apply the
-navgraph plugin — so in the generated gallery, `FeatureARoute`/`FeatureBRoute` are always
-thumbnail-less, while `HomeRoute` gets a real thumbnail: its screen, `HomeScreen`, carries the
-`@ScreenshotPreview`-annotated `HomeScreenPreview`, and `"Home"` naming-matches it.
+site generation (see "Nav Graph" above) alongside Phase 1's screenshot-test generation. Every
+module — `app`, `feature-a`, and `feature-b` — applies both the Phase 1 screenshot-testing plugin
+and the navgraph plugin, so in the generated gallery all three routes get a real thumbnail:
+`HomeRoute` from `HomeScreen`'s `@ScreenshotPreview`-annotated `HomeScreenPreview`, `FeatureARoute`
+from `FeatureAScreen`'s `FeatureAScreenPreview`, and `FeatureBRoute` from `FeatureBScreen`'s
+`FeatureBScreenPreview` — each naming-matched after stripping the `Route` suffix.
+
+`feature-b` also demonstrates the second of the two navigation-wiring shapes the edge detector
+(`NavEdgeScanner`) supports: its "Restart from Feature A" button calls `navigateTo(FeatureARoute)`
+directly inside `featureBNavEntries`/`FeatureBNavEntries.kt`, with no callback parameter threaded
+up to `sample/app` for that particular edge — unlike `feature-a`'s `onProceedClick`, which is
+written at the app level and passed in as a callback (see `AppNavHost.kt`/`FeatureANavEntries.kt`).
+Both shapes are found by the exact same call-graph algorithm; see `nav-graph-psi-analyzer`'s
+`NavEdgeScanner` kdoc for how.
 
 ## Known limitations
 
