@@ -15,6 +15,10 @@ plugins {
     // running the publish step described in the README. Bump alongside the root
     // gradle.properties `version=` whenever that changes.
     id("io.github.hayatoyagi.compose-preview-toolkit") version "0.1.0"
+    // Separate plugin id from the one above (see nav-graph-gradle-plugin's kdoc for why) — applied
+    // here too since `app` wires FeatureARoute/FeatureBRoute into its own NavDisplay and therefore
+    // has its own `entry<HomeRoute> {}` registration worth including in a node index.
+    id("io.github.hayatoyagi.compose-preview-toolkit.navgraph") version "0.1.0"
 }
 
 android {
@@ -43,8 +47,14 @@ composePreviewToolkit {
 }
 
 dependencies {
+    implementation(project(":feature-a"))
+    implementation(project(":feature-b"))
+
     implementation(libs.compose.runtime)
     implementation(libs.compose.foundation)
     implementation(libs.material3)
     implementation(libs.androidx.activity.compose)
+    implementation(libs.navigation3.runtime)
+    implementation(libs.navigation3.ui)
+    implementation(libs.lifecycle.viewmodel.navigation3)
 }

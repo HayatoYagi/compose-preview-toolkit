@@ -22,5 +22,6 @@ include(":annotations")
 include(":ksp-processor")
 include(":gradle-plugin")
 include(":nav-graph-psi-analyzer")
+include(":nav-graph-gradle-plugin")
 
 // `sample` is intentionally NOT included here — see sample/settings.gradle.kts for why.

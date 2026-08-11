@@ -27,9 +27,22 @@ ksp-symbol-processing-api = { module = "com.google.devtools.ksp:symbol-processin
 # Pinned to version.ref = "kotlin" (not a separately-tracked literal) so it can never drift from
 # the toolchain version above: kotlin-compiler-embeddable:2.4.0 does exist on mavenCentral() as
 # of this writing, so no discrepancy to document here. Only used by nav-graph-psi-analyzer, a
-# plain JVM library with no Gradle-API dependency, so the "collides with the Kotlin Gradle
-# Plugin's own bundled compiler" risk noted in the Phase 2 design doc does not apply yet — that
-# only becomes relevant once this is wired into a Gradle plugin/task in a later PR.
+# plain JVM library with no Gradle-API dependency.
+#
+# UPDATE (nav-graph-gradle-plugin PR): this IS now wired into a Gradle plugin/task, since
+# nav-graph-gradle-plugin depends on nav-graph-psi-analyzer, which exposes this artifact via
+# api(...). Confirmed in practice by building compose-preview-toolkit-sample's :app, :feature-a,
+# :feature-b (all apply the new `io.github.hayatoyagi.compose-preview-toolkit.navgraph` plugin
+# alongside AGP 9.2.1's built-in Kotlin support): Kotlin does emit its "'kotlin-compiler-embeddable'
+# Artifact Present in Build Classpath ... along Kotlin Gradle plugin" warning
+# (https://kotl.in/gradle/internal-compiler-symbols) at configuration time for every module that
+# applies the navgraph plugin. Despite the warning, `compileDebugKotlin` for all three modules
+# completed successfully with no actual miscompilation observed. Excluding the artifact isn't a
+# real option here — nav-graph-psi-analyzer's public API (KotlinPsiParser/NavNodeScanner) returns
+# KtFile/KtCallExpression types straight from it, so the exposure is load-bearing, not accidental.
+# A real fix (classloader isolation / shading kotlin-compiler-embeddable under a private package)
+# is out of scope for this PR — tracked as a known limitation; see nav-graph-gradle-plugin's
+# build.gradle.kts dependencies block for the same note at the actual collision site.
 kotlin-compiler-embeddable = { module = "org.jetbrains.kotlin:kotlin-compiler-embeddable", version.ref = "kotlin" }
 junit-jupiter = { module = "org.junit.jupiter:junit-jupiter", version.ref = "junit" }
 

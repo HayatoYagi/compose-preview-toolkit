@@ -2,28 +2,41 @@
 
 ## Local development
 
-`annotations`, `ksp-processor`, and `gradle-plugin` are a normal multi-project Gradle build at
-the repo root. `sample/` is a **separate** Gradle build (its own `settings.gradle.kts`/`gradlew`)
-that applies the plugin exactly like a real consumer would — see the comment at the top of
-`sample/settings.gradle.kts` for why. That means it needs the current in-progress version
-resolvable via `mavenLocal()` before it can build at all:
+`annotations`, `ksp-processor`, `gradle-plugin`, `nav-graph-psi-analyzer`, and
+`nav-graph-gradle-plugin` are a normal multi-project Gradle build at the repo root. `sample/` is a
+**separate** Gradle build (its own `settings.gradle.kts`/`gradlew`) that applies the plugins
+exactly like a real consumer would — see the comment at the top of `sample/settings.gradle.kts`
+for why. That means it needs the current in-progress version resolvable via `mavenLocal()` before
+it can build at all:
 
 ```
-./gradlew :annotations:publishToMavenLocal :ksp-processor:publishToMavenLocal :gradle-plugin:publishToMavenLocal
+./gradlew :annotations:publishToMavenLocal :ksp-processor:publishToMavenLocal :gradle-plugin:publishToMavenLocal \
+          :nav-graph-psi-analyzer:publishToMavenLocal :nav-graph-gradle-plugin:publishToMavenLocal
 cd sample
 ./gradlew updateDebugScreenshotTest
 ./gradlew validateDebugScreenshotTest
+./gradlew :app:generateDebugNavGraph :feature-a:generateDebugNavGraph :feature-b:generateDebugNavGraph
 ```
 
-Re-run the `publishToMavenLocal` step after any change to `annotations`, `ksp-processor`, or
-`gradle-plugin` to pick it up in `sample`.
+Re-run the `publishToMavenLocal` step after any change to `annotations`, `ksp-processor`,
+`gradle-plugin`, `nav-graph-psi-analyzer`, or `nav-graph-gradle-plugin` to pick it up in `sample`.
+
+`sample/` is itself a multi-module build: `sample/app` (the Nav3 host, applies both the Phase 1
+screenshot-test plugin and the navgraph plugin), `sample/feature-a`, and `sample/feature-b` (each
+apply only the navgraph plugin — see `sample/app/src/main/kotlin/.../AppNavHost.kt` for how they're
+wired together). `generateDebugNavGraph` writes each module's own `ComposePreviewToolkitNavNodeIndex.txt`
+under that module's `build/generated/composePreviewToolkit/navGraph/debug/` — module-local by
+design; cross-module aggregation into a single graph is a later milestone (see `docs/ROADMAP.md`).
 
 ## Opening a PR
 
-`ci.yml` runs on every PR: it builds `annotations`/`ksp-processor`/`gradle-plugin`, publishes
-them to `mavenLocal`, then runs this repo's own `update-validate-screenshot-tests` composite
-action against `sample/` — so a broken plugin/processor change or a broken `action.yml` both
-surface directly in the PR's checks.
+`ci.yml` runs on every PR: it builds `annotations`/`ksp-processor`/`gradle-plugin`/
+`nav-graph-psi-analyzer`/`nav-graph-gradle-plugin`, publishes them to `mavenLocal`, then runs this
+repo's own `update-validate-screenshot-tests` composite action against `sample/` — so a broken
+plugin/processor change or a broken `action.yml` both surface directly in the PR's checks. That
+action only exercises Phase 1 (`updateDebugScreenshotTest`/`validateDebugScreenshotTest`, which
+Gradle resolves to just `:app` since only `sample/app` applies the Phase 1 plugin); it doesn't run
+`generateDebugNavGraph` — dogfooding that in CI is a later PR's job (see `docs/ROADMAP.md`).
 
 ## Releasing a new version
 
@@ -35,8 +48,9 @@ local machine.
    ```
    gh workflow run bump-version.yml -f bump=patch
    ```
-   This opens a PR bumping `version=` in the root `gradle.properties` and the plugin `version` in
-   `sample/build.gradle.kts` (kept in sync — see the comment there).
+   This opens a PR bumping `version=` in the root `gradle.properties` and the plugin `version`(s)
+   in `sample/app`, `sample/feature-a`, and `sample/feature-b`'s `build.gradle.kts` (kept in sync
+   — see the comment in `sample/settings.gradle.kts`).
 2. Review and merge that PR into `main`.
 3. Merging triggers **Tag Release** automatically: it creates and pushes a `vX.Y.Z` tag, creates
    a GitHub Release, then calls **Publish**.
