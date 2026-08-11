@@ -37,8 +37,10 @@ jobs:
         uses: HayatoYagi/compose-preview-toolkit/.github/actions/update-validate-screenshot-tests@v0.1.0
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
-          # working-directory: sample
+          working-directory: sample
 ```
+
+If your screenshot-tested build lives at the repository root, omit `working-directory`.
 
 ## Inputs
 
@@ -50,4 +52,5 @@ Common options:
 - `gradle-args`: pass extra args to both Gradle tasks
 - `skip-validate`: set to `"true"` to only update baselines
 - `push-ref`: override target branch ref for the auto-commit push
+
 
