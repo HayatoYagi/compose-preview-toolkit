@@ -1,6 +1,6 @@
 # Roadmap
 
-## v1 — screenshot-test generation (this scaffold)
+## Phase 1 — screenshot-test generation (current)
 
 - `annotations`: `@ScreenshotPreview` marker annotation.
 - `ksp-processor`: discovers `@ScreenshotPreview` functions, writes a per-module index resource.
@@ -10,10 +10,10 @@
 - `.github/actions/update-validate-screenshot-tests`: reusable composite action wrapping the
   CI-side update/validate flow.
 
-Known v1 limitations: `debug` build type only; tracks an alpha AGP feature
+Known Phase 1 limitations: `debug` build type only; tracks an alpha AGP feature
 (`com.android.compose.screenshot`), so upstream breaking changes may require a plugin bump.
 
-## v2 — navigation graph + screenshot site (not started)
+## Phase 2 — navigation graph + screenshot site (not started)
 
 Goal: statically analyze a Compose type-safe navigation graph and render it as a static site —
 each screen node linked to its already-generated screenshot baseline — deployed to GitHub Pages,
@@ -24,7 +24,7 @@ Planned pieces:
 
 - **Nodes**: a new KSP processor (or an extension of `ksp-processor`) enumerates
   `composable<Route> { ... }` declarations inside `NavHost` blocks — this is straightforward
-  declaration-level KSP analysis, same category of work as v1's preview scanning.
+  declaration-level KSP analysis, same category of work as Phase 1's preview scanning.
 - **Edges**: best-effort detection of `navController.navigate(RouteB(...))` call sites and which
   route they construct. This is a source/PSI-level analysis problem, not a declaration-level one
   — KSP's symbol resolution alone is not expected to be sufficient for arbitrary call sites
@@ -33,12 +33,12 @@ Planned pieces:
   negatives/positives) or, if that proves too unreliable, a fallback to an explicit
   `@NavigatesTo(RouteB::class)` annotation on routes as an opt-in escape hatch.
 - **Site generation**: a Gradle task that reads the node/edge graph plus the `screenshotTestDebug`
-  reference PNGs already produced by v1's pipeline (matched by wrapper-function naming
+  reference PNGs already produced by Phase 1's pipeline (matched by wrapper-function naming
   convention), and renders a static HTML page (e.g. Mermaid.js/D3 graph with embedded/linked
   thumbnails).
 - **Deployment**: a second reusable composite action (or workflow) wrapping
   `actions/deploy-pages` for consumers who want this in their own CI.
 
-This is intentionally scoped out of v1: it is a materially different technical problem (source
-call-graph analysis vs. declaration scanning) and a larger surface area. Revisit once v1 has
-real-world usage and the edge-detection approach has been prototyped.
+This is intentionally scoped out of Phase 1: it is a materially different technical problem
+(source call-graph analysis vs. declaration scanning) and a larger surface area. Revisit once
+Phase 1 has real-world usage and the edge-detection approach has been prototyped.

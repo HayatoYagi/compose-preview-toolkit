@@ -10,6 +10,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import io.github.hayatoyagi.composepreviewtoolkit.annotations.ScreenshotPreview
 
@@ -32,16 +33,16 @@ fun GreetingScreen(name: String) {
 }
 
 /**
- * The only file a consumer needs to touch: adding `@ScreenshotPreview` here is enough for the
- * compose-preview-toolkit Gradle plugin to generate a matching screenshot test in the
- * `debugScreenshotTest` source set — nothing to add under `androidTest`/`screenshotTest`.
+ * `@Preview` alone would already show this in Android Studio's Preview panel. Adding
+ * `@ScreenshotPreview` next to it is enough for the compose-preview-toolkit Gradle plugin to
+ * also generate a matching screenshot test in the `debugScreenshotTest` source set — nothing to
+ * add under `androidTest`/`screenshotTest`.
  */
-internal object GreetingScreenPreviews {
-    @ScreenshotPreview
-    @Composable
-    internal fun Default() {
-        MaterialTheme {
-            GreetingScreen(name = "compose-preview-toolkit")
-        }
+@Preview
+@ScreenshotPreview
+@Composable
+internal fun GreetingScreenPreview() {
+    MaterialTheme {
+        GreetingScreen(name = "compose-preview-toolkit")
     }
 }

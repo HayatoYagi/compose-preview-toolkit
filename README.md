@@ -7,14 +7,29 @@ A Gradle plugin that turns a single marker annotation on your Jetpack Compose `@
 functions into AGP's official [Compose Preview Screenshot Testing](https://developer.android.com/studio/preview/compose-screenshot-testing)
 wrappers — no hand-duplicated `@PreviewTest` functions in `androidTest`/`screenshotTest`.
 
+**Before** — two functions in two files, kept in sync by hand:
+
 ```kotlin
-// Before: a second, hand-maintained copy under src/screenshotTest
+// src/main/kotlin/.../GreetingScreen.kt — for Android Studio's Preview panel
+@Preview
+@Composable
+fun GreetingPreview() { GreetingScreen(name = "Android") }
+```
+
+```kotlin
+// src/screenshotTest/kotlin/.../GreetingScreenshotTest.kt — a second copy you write and maintain
 @PreviewTest
 @Preview
 @Composable
 fun GreetingPreview() { GreetingScreen(name = "Android") }
+```
 
-// After: one annotation in src/main, nothing else to write or keep in sync
+**After** — one function, one file. `@Preview` stays for Android Studio's Preview panel; adding
+`@ScreenshotPreview` next to it is all that's needed for the screenshot test:
+
+```kotlin
+// src/main/kotlin/.../GreetingScreen.kt
+@Preview
 @ScreenshotPreview
 @Composable
 fun GreetingPreview() { GreetingScreen(name = "Android") }
@@ -81,14 +96,14 @@ by default adds `io.github.hayatoyagi:compose-preview-toolkit-annotations` so
 4. Run `./gradlew validateDebugScreenshotTest` in CI to catch visual regressions.
 
 ```kotlin
+import androidx.compose.ui.tooling.preview.Preview
 import io.github.hayatoyagi.composepreviewtoolkit.annotations.ScreenshotPreview
 
-internal object GreetingScreenPreviews {
-    @ScreenshotPreview
-    @Composable
-    internal fun Default() {
-        MaterialTheme { GreetingScreen(name = "compose-preview-toolkit") }
-    }
+@Preview
+@ScreenshotPreview
+@Composable
+internal fun GreetingScreenPreview() {
+    MaterialTheme { GreetingScreen(name = "compose-preview-toolkit") }
 }
 ```
 
@@ -140,7 +155,7 @@ this repo is under active development.
 
 ## Known limitations
 
-- Only the `debug` build type is supported in v1.
+- Only the `debug` build type is supported currently.
 - AGP's Compose Preview Screenshot Testing is still an alpha feature (`0.0.1-alpha1x` as of this
   writing); breaking changes upstream may require a plugin update.
 
