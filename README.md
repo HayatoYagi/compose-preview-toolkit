@@ -144,14 +144,44 @@ See [.github/actions/update-validate-screenshot-tests/README.md](.github/actions
 for requirements and a full workflow example, or [action.yml](.github/actions/update-validate-screenshot-tests/action.yml)
 for every input.
 
+## Nav Graph (experimental, node extraction only)
+
+A **separate** plugin id, `io.github.hayatoyagi.compose-preview-toolkit.navgraph` — deliberately
+not bundled into the plugin above, since it pulls in a heavy embedded-Kotlin-compiler dependency
+that only Navigation3 users need (see `nav-graph-gradle-plugin`'s kdoc for why). Statically scans a
+module's own `src/main/kotlin` for Navigation3 `entry<Route> { ... }` registrations via Kotlin PSI
+(no type resolution) and writes a node index:
+
+```kotlin
+// feature module's build.gradle.kts
+plugins {
+    id("io.github.hayatoyagi.compose-preview-toolkit.navgraph") version "<version>"
+}
+```
+
+```
+./gradlew generateDebugNavGraph
+```
+
+writes `build/generated/composePreviewToolkit/navGraph/debug/ComposePreviewToolkitNavNodeIndex.txt`
+(tab-separated `packageName\tsimpleName\tqualifiedName`), scoped to that module's own sources only
+— see `sample/feature-a`/`sample/feature-b` for a worked example, and `docs/ROADMAP.md` for what's
+still to come (edge detection, cross-module aggregation, the screenshot-paired site). Configure via
+the `composePreviewToolkitNavGraph { ... }` extension (currently just `entryFunctionNames`, in case
+your codebase uses a differently-named `entry`-shaped registration function).
+
 ## Sample App
 
-`sample/` is a minimal Android app demonstrating end-to-end usage (not published). It's a
-**separate Gradle build** (its own `settings.gradle.kts`, `gradlew`) rather than a subproject of
-the root build — see the comment at the top of `sample/settings.gradle.kts` for why: it applies
-the plugin exactly like a real consumer (`id("io.github.hayatoyagi.compose-preview-toolkit")
+`sample/` is a minimal, multi-module Android app demonstrating end-to-end usage (not published).
+It's a **separate Gradle build** (its own `settings.gradle.kts`, `gradlew`) rather than a
+subproject of the root build — see the comment at the top of `sample/settings.gradle.kts` for why:
+it applies the plugin(s) exactly like a real consumer would (`id("io.github.hayatoyagi.compose-preview-toolkit")
 version "<version>"`), and that version is always ahead of whatever's actually published while
 this repo is under active development.
+
+`sample/app` is a small Navigation3 app wiring together `sample/feature-a` and `sample/feature-b`
+(each a separate feature module), demonstrating the nav-graph plugin's node extraction (see "Nav
+Graph" above) alongside Phase 1's screenshot-test generation.
 
 ## Known limitations
 
@@ -161,11 +191,13 @@ this repo is under active development.
 
 ## Roadmap
 
-- **Navigation graph + screenshot site (planned, not started)**: statically extract a Compose
-  type-safe navigation graph (nodes from `composable<Route>` declarations, edges via
-  best-effort scanning of `navigate(...)` call sites), pair each screen node with its generated
-  screenshot baseline, and publish a static site to GitHub Pages for quick visual review of the
-  whole app's navigation flow.
+- **Navigation graph + screenshot site (in progress)**: statically extract a Navigation3 nav
+  graph and pair each screen node with its generated screenshot baseline, publishing a static
+  site to GitHub Pages for quick visual review of the whole app's navigation flow. Node
+  extraction (`io.github.hayatoyagi.compose-preview-toolkit.navgraph` plugin, `nav-graph-psi-analyzer`,
+  the `generateDebugNavGraph` task) is available now — see `sample/feature-a`/`sample/feature-b`.
+  Edge detection, cross-module aggregation, and the site itself are not yet implemented; see
+  `docs/ROADMAP.md` for the full design and PR sequence.
 
 ## Contributing
 
