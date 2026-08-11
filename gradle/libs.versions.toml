@@ -11,6 +11,7 @@ androidx-activity = "1.13.0"
 material3 = "1.5.0-alpha23"
 mavenPublish = "0.31.0"
 gradlePluginPublish = "1.3.1"
+junit = "6.1.3"
 
 [libraries]
 compose-ui-tooling-preview = { module = "androidx.compose.ui:ui-tooling-preview", version.ref = "compose" }
@@ -21,6 +22,16 @@ material3 = { module = "androidx.compose.material3:material3", version.ref = "ma
 androidx-activity-compose = { module = "androidx.activity:activity-compose", version.ref = "androidx-activity" }
 screenshot-validation-api = { module = "com.android.tools.screenshot:screenshot-validation-api", version.ref = "screenshot" }
 ksp-symbol-processing-api = { module = "com.google.devtools.ksp:symbol-processing-api", version.ref = "ksp" }
+# Standalone Kotlin PSI parsing (KotlinCoreEnvironment/PsiFileFactory -> KtFile), the same
+# artifact tools like ktlint/detekt use to get a KtFile outside a real compiler invocation.
+# Pinned to version.ref = "kotlin" (not a separately-tracked literal) so it can never drift from
+# the toolchain version above: kotlin-compiler-embeddable:2.4.0 does exist on mavenCentral() as
+# of this writing, so no discrepancy to document here. Only used by nav-graph-psi-analyzer, a
+# plain JVM library with no Gradle-API dependency, so the "collides with the Kotlin Gradle
+# Plugin's own bundled compiler" risk noted in the Phase 2 design doc does not apply yet — that
+# only becomes relevant once this is wired into a Gradle plugin/task in a later PR.
+kotlin-compiler-embeddable = { module = "org.jetbrains.kotlin:kotlin-compiler-embeddable", version.ref = "kotlin" }
+junit-jupiter = { module = "org.junit.jupiter:junit-jupiter", version.ref = "junit" }
 
 [plugins]
 androidApplication = { id = "com.android.application", version.ref = "agp" }

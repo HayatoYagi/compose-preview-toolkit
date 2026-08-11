@@ -21,5 +21,6 @@ rootProject.name = "compose-preview-toolkit"
 include(":annotations")
 include(":ksp-processor")
 include(":gradle-plugin")
+include(":nav-graph-psi-analyzer")
 
 // `sample` is intentionally NOT included here — see sample/settings.gradle.kts for why.
