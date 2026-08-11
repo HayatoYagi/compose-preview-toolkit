@@ -119,10 +119,6 @@ See `ComposePreviewToolkitExtension.kt` for every available property, including 
 
 ### Composite GitHub Action
 
-Reusable action docs (requirements, permissions, and full workflow example):
-
-- [.github/actions/update-validate-screenshot-tests/README.md](.github/actions/update-validate-screenshot-tests/README.md)
-
 ```yaml
 - uses: HayatoYagi/compose-preview-toolkit/.github/actions/update-validate-screenshot-tests@v0.1.0
   with:
