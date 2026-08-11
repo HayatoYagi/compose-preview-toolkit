@@ -1,0 +1,82 @@
+name: 'Update & Validate Compose Preview Screenshot Tests'
+description: >-
+  Runs AGP's official updateDebugScreenshotTest to refresh baselines (auto-committing and
+  pushing the diff back to the current branch if any baselines changed), then runs
+  validateDebugScreenshotTest to assert screenshots still match. Designed for repos using
+  compose-preview-toolkit's Gradle plugin, but only relies on AGP's own standard
+  screenshotTestDebug reference-image directory convention — no compose-preview-toolkit-specific
+  paths involved.
+author: 'HayatoYagi'
+
+inputs:
+  github-token:
+    description: >-
+      Token used to push the baseline-update commit. Must have write access to the repository
+      and the current ref (e.g. a GitHub App installation token, or a PAT — the default
+      GITHUB_TOKEN works for pushing but won't trigger other workflows on that push).
+    required: true
+  git-user-name:
+    description: 'Git author name used for the baseline-update commit.'
+    required: false
+    default: 'github-actions[bot]'
+  git-user-email:
+    description: 'Git author email used for the baseline-update commit.'
+    required: false
+    default: 'github-actions[bot]@users.noreply.github.com'
+  commit-message:
+    description: 'Commit message used when baselines changed.'
+    required: false
+    default: 'test: update screenshot baselines'
+  reference-path-glob:
+    description: 'Pathspec matched against changed reference images. AGP''s default convention.'
+    required: false
+    default: '**/src/screenshotTestDebug/reference/**'
+  gradle-args:
+    description: 'Extra arguments appended to both Gradle invocations (e.g. -Djava.net.preferIPv4Stack=true).'
+    required: false
+    default: ''
+  push-ref:
+    description: 'Ref to push the baseline-update commit to. Defaults to the current branch.'
+    required: false
+    default: ''
+  skip-validate:
+    description: 'Set to "true" to only update baselines and skip running validateDebugScreenshotTest.'
+    required: false
+    default: 'false'
+  working-directory:
+    description: >-
+      Directory containing the gradlew invoked by this action. Defaults to the repo root; set
+      this if your screenshot-tested module lives in a separate Gradle build (own gradlew), e.g.
+      this repo's own sample/ (see sample/settings.gradle.kts for why it's separate).
+    required: false
+    default: '.'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Update screenshot baselines if needed
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+      run: |
+        ./gradlew updateDebugScreenshotTest ${{ inputs.gradle-args }}
+        git add -- '${{ inputs.reference-path-glob }}'
+        if ! git diff --cached --quiet -- '${{ inputs.reference-path-glob }}'; then
+          git config user.name "${{ inputs.git-user-name }}"
+          git config user.email "${{ inputs.git-user-email }}"
+          git commit -m "${{ inputs.commit-message }}"
+          ref="${{ inputs.push-ref }}"
+          if [ -z "$ref" ]; then
+            ref="${GITHUB_HEAD_REF:-${GITHUB_REF_NAME}}"
+          fi
+          git push origin "HEAD:$ref"
+        fi
+
+    - name: Validate screenshot tests
+      if: inputs.skip-validate != 'true'
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+      run: ./gradlew validateDebugScreenshotTest ${{ inputs.gradle-args }}

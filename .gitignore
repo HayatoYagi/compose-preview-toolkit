@@ -1,0 +1,11 @@
+*.iml
+.gradle/
+build/
+/captures
+.externalNativeBuild
+.cxx
+local.properties
+.idea/
+!.idea/vcs.xml
+.DS_Store
+/.gradle/configuration-cache/

@@ -1,0 +1,55 @@
+name: Publish
+
+on:
+  push:
+    tags: ['v*']
+  workflow_call:
+    secrets:
+      GRADLE_PUBLISH_KEY:
+        required: true
+      GRADLE_PUBLISH_SECRET:
+        required: true
+      MAVEN_CENTRAL_USERNAME:
+        required: true
+      MAVEN_CENTRAL_PASSWORD:
+        required: true
+      GPG_PRIVATE_KEY:
+        required: true
+      GPG_PASSPHRASE:
+        required: true
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      # Gradle Plugin Portal: the gradle-plugin module itself.
+      - name: Publish plugin to Gradle Plugin Portal
+        env:
+          GRADLE_PUBLISH_KEY: ${{ secrets.GRADLE_PUBLISH_KEY }}
+          GRADLE_PUBLISH_SECRET: ${{ secrets.GRADLE_PUBLISH_SECRET }}
+        run: ./gradlew :gradle-plugin:publishPlugins
+
+      # Maven Central (Central Portal): the annotations & ksp-processor libraries the plugin
+      # references at runtime.
+      - name: Publish annotations & ksp-processor to Maven Central
+        env:
+          ORG_GRADLE_PROJECT_mavenCentralUsername: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
+          ORG_GRADLE_PROJECT_mavenCentralPassword: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}
+          ORG_GRADLE_PROJECT_signingInMemoryKey: ${{ secrets.GPG_PRIVATE_KEY }}
+          ORG_GRADLE_PROJECT_signingInMemoryKeyPassword: ${{ secrets.GPG_PASSPHRASE }}
+        run: |
+          ./gradlew \
+            :annotations:publishAllPublicationsToMavenCentralRepository \
+            :ksp-processor:publishAllPublicationsToMavenCentralRepository

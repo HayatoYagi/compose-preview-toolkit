@@ -1,0 +1,51 @@
+name: Tag Release
+
+on:
+  push:
+    branches: [main]
+    paths: ['gradle.properties']
+
+permissions:
+  contents: write
+
+jobs:
+  tag-release:
+    runs-on: ubuntu-latest
+    outputs:
+      tag-created: ${{ steps.tag.outputs.created }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Read version
+        id: version
+        run: |
+          version=$(grep '^version=' gradle.properties | cut -d'=' -f2)
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Create and push tag if missing
+        id: tag
+        run: |
+          tag="v${{ steps.version.outputs.version }}"
+          if git rev-parse "$tag" >/dev/null 2>&1; then
+            echo "created=false" >> "$GITHUB_OUTPUT"
+          else
+            git tag "$tag"
+            git push origin "$tag"
+            echo "created=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create GitHub Release
+        if: steps.tag.outputs.created == 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: "v${{ steps.version.outputs.version }}"
+          generate_release_notes: true
+
+  publish:
+    needs: tag-release
+    if: needs.tag-release.outputs.tag-created == 'true'
+    uses: ./.github/workflows/publish.yml
+    secrets: inherit

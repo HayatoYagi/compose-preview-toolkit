@@ -1,0 +1,52 @@
+name: Bump Version
+
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: 'Version part to bump'
+        type: choice
+        required: true
+        options: [patch, minor, major]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  bump-version:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Compute new version
+        id: version
+        run: |
+          current=$(grep '^version=' gradle.properties | cut -d'=' -f2)
+          IFS='.' read -r major minor patch <<< "$current"
+          case "${{ github.event.inputs.bump }}" in
+            major) major=$((major + 1)); minor=0; patch=0 ;;
+            minor) minor=$((minor + 1)); patch=0 ;;
+            patch) patch=$((patch + 1)) ;;
+          esac
+          echo "new_version=$major.$minor.$patch" >> "$GITHUB_OUTPUT"
+
+      - name: Update gradle.properties
+        run: sed -i "s/^version=.*/version=${{ steps.version.outputs.new_version }}/" gradle.properties
+
+      # sample/build.gradle.kts hardcodes the plugin version it applies (see the comment there
+      # explaining why sample is a separate build) — keep it in sync with every bump.
+      - name: Update sample/build.gradle.kts plugin version
+        run: |
+          sed -i \
+            's/id("io.github.hayatoyagi.compose-preview-toolkit") version ".*"/id("io.github.hayatoyagi.compose-preview-toolkit") version "${{ steps.version.outputs.new_version }}"/' \
+            sample/build.gradle.kts
+
+      - name: Create release PR
+        uses: peter-evans/create-pull-request@v7
+        with:
+          commit-message: "chore: release v${{ steps.version.outputs.new_version }}"
+          title: "chore: release v${{ steps.version.outputs.new_version }}"
+          branch: "release/v${{ steps.version.outputs.new_version }}"
+          base: main

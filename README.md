@@ -1,0 +1,164 @@
+# compose-preview-toolkit
+
+[![Maven Central](https://img.shields.io/maven-central/v/io.github.hayatoyagi/compose-preview-toolkit-annotations)](https://central.sonatype.com/namespace/io.github.hayatoyagi)
+
+A Gradle plugin that turns a single marker annotation on your Jetpack Compose `@Preview`
+functions into AGP's official [Compose Preview Screenshot Testing](https://developer.android.com/studio/preview/compose-screenshot-testing)
+wrappers — no hand-duplicated `@PreviewTest` functions in `androidTest`/`screenshotTest`.
+
+## Overview
+
+- Write `@ScreenshotPreview` next to your `@Preview` composable in `src/main` — that's it.
+- A KSP processor finds every `@ScreenshotPreview` function at compile time.
+- The Gradle plugin generates the matching `@PreviewTest` wrapper directly into AGP's
+  `debugScreenshotTest` source set, wires it into `updateDebugScreenshotTest` /
+  `validateDebugScreenshotTest`, and cleans up stale baseline images when previews are
+  renamed or removed.
+- A reusable composite GitHub Action (`.github/actions/update-validate-screenshot-tests`) wraps
+  the CI-side "update baselines, commit if changed, then validate" flow for you.
+
+## Motivation
+
+**Before** — the official workflow requires a second, hand-maintained copy of every preview you
+want screenshot-tested:
+
+```kotlin
+// src/main/kotlin/.../GreetingScreen.kt
+@Preview
+@Composable
+fun GreetingPreview() { GreetingScreen(name = "Android") }
+```
+
+```kotlin
+// src/screenshotTest/kotlin/.../GreetingScreenshotTest.kt  (you write and maintain this too)
+@PreviewTest
+@Preview
+@Composable
+fun GreetingPreview() { GreetingScreen(name = "Android") }
+```
+
+**After** — one annotation, nothing to add under `screenshotTest`:
+
+```kotlin
+// src/main/kotlin/.../GreetingScreen.kt
+@ScreenshotPreview
+@Composable
+fun GreetingPreview() { GreetingScreen(name = "Android") }
+```
+
+## Installation
+
+```kotlin
+// settings.gradle.kts
+pluginManagement {
+    repositories {
+        gradlePluginPortal()
+        google()
+        mavenCentral()
+    }
+}
+```
+
+```kotlin
+// app or feature module's build.gradle.kts
+plugins {
+    id("com.android.application") // or com.android.library — AGP 9's built-in Kotlin support
+                                   // means you do NOT also apply org.jetbrains.kotlin.android
+    id("org.jetbrains.kotlin.plugin.compose")
+    id("io.github.hayatoyagi.compose-preview-toolkit") version "<version>"
+}
+```
+
+The plugin applies `com.android.compose.screenshot` and `com.google.devtools.ksp` for you, and
+by default adds `io.github.hayatoyagi:compose-preview-toolkit-annotations` so
+`@ScreenshotPreview`/`@PreviewSet` are available.
+
+## Quick Start
+
+1. Write a normal `@Preview` composable.
+2. Add `@ScreenshotPreview` next to it.
+3. Run `./gradlew updateDebugScreenshotTest` once to generate the initial baseline image(s).
+4. Run `./gradlew validateDebugScreenshotTest` in CI to catch visual regressions.
+
+```kotlin
+import io.github.hayatoyagi.composepreviewtoolkit.annotations.ScreenshotPreview
+
+internal object GreetingScreenPreviews {
+    @ScreenshotPreview
+    @Composable
+    internal fun Default() {
+        MaterialTheme { GreetingScreen(name = "compose-preview-toolkit") }
+    }
+}
+```
+
+## Features
+
+### `@ScreenshotPreview`
+
+Marks a parameterless `@Composable` preview function for screenshot-test generation. Works on
+top-level functions or functions nested directly inside a Kotlin `object`.
+
+### `@PreviewSet`
+
+Optional bundled light/dark multi-preview annotation, stacked by default on every generated
+wrapper. Bring your own instead via the plugin extension:
+
+```kotlin
+composePreviewToolkit {
+    annotationFqn.set("com.example.app.ScreenshotPreview")           // use your own marker
+    extraPreviewAnnotationFqn.set("com.example.app.LightDarkPreview") // use your own multi-preview
+}
+```
+
+### Composite GitHub Action
+
+```yaml
+- uses: HayatoYagi/compose-preview-toolkit/.github/actions/update-validate-screenshot-tests@v0.1.0
+  with:
+    github-token: ${{ secrets.GITHUB_TOKEN }}
+```
+
+See [action.yml](.github/actions/update-validate-screenshot-tests/action.yml) for all inputs.
+
+## Sample App
+
+`sample/` is a minimal Android app demonstrating end-to-end usage (not published). It's a
+**separate Gradle build** (its own `settings.gradle.kts`, `gradlew`) rather than a subproject of
+the root build — see the comment at the top of `sample/settings.gradle.kts` for why: it applies
+the plugin exactly like a real consumer (`id("io.github.hayatoyagi.compose-preview-toolkit")
+version "<version>"`), and that version is always ahead of whatever's actually published while
+this repo is under active development.
+
+### Local development
+
+From the repo root, publish the current in-progress version to your local Maven cache, then
+build/run `sample` as its own project:
+
+```
+./gradlew :annotations:publishToMavenLocal :ksp-processor:publishToMavenLocal :gradle-plugin:publishToMavenLocal
+cd sample
+./gradlew updateDebugScreenshotTest
+./gradlew validateDebugScreenshotTest
+```
+
+Re-run the `publishToMavenLocal` step after any change to `annotations`, `ksp-processor`, or
+`gradle-plugin` to pick it up in `sample`.
+
+## Known limitations
+
+- Only the `debug` build type is supported in v1.
+- AGP's Compose Preview Screenshot Testing is still an alpha feature (`0.0.1-alpha1x` as of this
+  writing); breaking changes upstream may require a plugin update.
+
+## Roadmap
+
+- **Navigation graph + screenshot site (planned, not started)**: statically extract a Compose
+  type-safe navigation graph (nodes from `composable<Route>` declarations, edges via
+  best-effort scanning of `navigate(...)` call sites), pair each screen node with its generated
+  screenshot baseline, and publish a static site to GitHub Pages for quick visual review of the
+  whole app's navigation flow.
+
+## License
+
+Apache-2.0 — see [LICENSE](LICENSE).

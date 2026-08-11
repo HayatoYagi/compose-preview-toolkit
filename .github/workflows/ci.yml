@@ -1,0 +1,53 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref || github.ref_name }}
+          fetch-depth: 0
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Install Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Build and test annotations, ksp-processor, gradle-plugin
+        run: ./gradlew --stacktrace :annotations:build :ksp-processor:build :gradle-plugin:build
+
+      # sample/ is a separate Gradle build (see sample/settings.gradle.kts) that applies the
+      # plugin exactly like a real consumer would, so it needs this repo's current in-progress
+      # version resolvable via mavenLocal() before it can configure at all.
+      - name: Publish current version to mavenLocal for sample/ to consume
+        run: ./gradlew --stacktrace :annotations:publishToMavenLocal :ksp-processor:publishToMavenLocal :gradle-plugin:publishToMavenLocal
+
+      # Dogfeeds this repo's own composite action against the sample module, so a broken
+      # action.yml or a broken plugin/processor change surfaces in this repo's own CI.
+      - name: Update & validate sample screenshot tests
+        uses: ./.github/actions/update-validate-screenshot-tests
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          working-directory: sample
