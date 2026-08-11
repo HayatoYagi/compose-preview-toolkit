@@ -98,9 +98,10 @@ class ComposePreviewToolkitPlugin : Plugin<Project> {
                 "debugImplementation",
                 "androidx.compose.ui:ui-tooling:${extension.composeVersion.get()}",
             )
-            if (extension.annotationFqn.get() == ScreenshotPreviewProcessorProvider.DEFAULT_ANNOTATION_FQN ||
-                extension.extraPreviewAnnotationFqn.get() == DEFAULT_EXTRA_PREVIEW_ANNOTATION_FQN
-            ) {
+            // extraPreviewAnnotationFqn's default (androidx.compose.ui.tooling.preview.Preview)
+            // is already on the classpath via the ui-tooling-preview dependency added above, so
+            // only annotationFqn's default requires adding this toolkit's own annotations artifact.
+            if (extension.annotationFqn.get() == ScreenshotPreviewProcessorProvider.DEFAULT_ANNOTATION_FQN) {
                 target.dependencies.add(
                     "implementation",
                     "io.github.hayatoyagi:compose-preview-toolkit-annotations:$PLUGIN_VERSION",

@@ -7,7 +7,8 @@ package io.github.hayatoyagi.composepreviewtoolkit.gradle
 internal const val DEFAULT_COMPOSE_VERSION = "1.11.4"
 internal const val DEFAULT_SCREENSHOT_VALIDATION_API_VERSION = "0.0.1-alpha15"
 
-// Bundled multi-preview annotation stacked on generated wrappers unless the consumer
-// configures `extraPreviewAnnotationFqn` to point at their own.
-internal const val DEFAULT_EXTRA_PREVIEW_ANNOTATION_FQN =
-    "io.github.hayatoyagi.composepreviewtoolkit.annotations.PreviewSet"
+// Annotation stacked on generated wrappers unless the consumer configures
+// `extraPreviewAnnotationFqn` to point at their own (e.g. a light/dark multi-preview
+// annotation). Defaults to the plain Compose tooling annotation — no app-specific styling
+// opinions (background color, uiMode, etc.) baked into this toolkit's own defaults.
+internal const val DEFAULT_EXTRA_PREVIEW_ANNOTATION_FQN = "androidx.compose.ui.tooling.preview.Preview"

@@ -34,8 +34,13 @@ android {
     }
 }
 
-// Zero extra configuration needed: the plugin's bundled ScreenshotPreview/PreviewSet
-// annotations (from the `annotations` module) are used by default.
+// annotationFqn is left at its default (@ScreenshotPreview from the `annotations` module), but
+// extraPreviewAnnotationFqn is pointed at this app's own light/dark annotation instead of the
+// plugin's plain single-preview default — demonstrates the "bring your own multi-preview
+// annotation" extension point.
+composePreviewToolkit {
+    extraPreviewAnnotationFqn.set("io.github.hayatoyagi.composepreviewtoolkit.sample.LightDarkPreview")
+}
 
 dependencies {
     implementation(libs.compose.runtime)
