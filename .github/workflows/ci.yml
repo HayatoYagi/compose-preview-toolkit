@@ -51,3 +51,7 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           working-directory: sample
+          # No leading "**/": with working-directory set, git commands run from inside sample/,
+          # where src/ sits directly at the top — the action's own multi-module-repo default
+          # (**/src/screenshotTestDebug/reference/**) doesn't match a zero-parent-segments path.
+          reference-path-glob: 'src/screenshotTestDebug/reference/**'
