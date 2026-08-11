@@ -41,13 +41,29 @@ local machine.
 3. Merging triggers **Tag Release** automatically: it creates and pushes a `vX.Y.Z` tag, creates
    a GitHub Release, then calls **Publish**.
 4. **Publish** pushes `gradle-plugin` to the Gradle Plugin Portal and `annotations`/
-   `ksp-processor` to Maven Central.
+   `ksp-processor` to Maven Central. Both go fully live automatically — Maven Central publishing
+   is set to automatic release (`mavenCentralAutomaticPublishing=true` in `gradle.properties`),
+   so there's no manual "Publish" click on central.sonatype.com to remember.
+5. **First release of a new plugin ID only**: Gradle Plugin Portal holds a brand-new plugin ID's
+   initial version for manual moderation before it becomes publicly visible — this only happens
+   once (re-triggered only by changing the Maven group or plugin ID), and there's nothing to do
+   but wait for their approval email. Version bumps after that publish immediately.
 
 If **Publish** fails partway (e.g. missing secrets) after the tag/release were already created,
-don't re-run **Bump Version** for a new version to "retry" — re-run the failed `publish` job
-directly from the **Tag Release** run instead (Actions → that run → Re-run failed jobs), once
-the actual problem is fixed. Bumping again would leave the earlier tag/release permanently
-dangling with nothing actually published under it.
+don't re-run **Bump Version** for a new version to "retry" it. Bumping again would leave the
+earlier tag/release permanently dangling with nothing actually published under it. Instead, once
+the actual problem is fixed, manually dispatch **Publish** for just the side that failed —
+Gradle Plugin Portal rejects re-publishing a version that already succeeded there, so re-running
+both unconditionally isn't an option:
+
+```
+gh workflow run publish.yml -f target=maven-central -f ref=vX.Y.Z
+# or -f target=plugin-portal, or -f target=both if neither side succeeded
+```
+
+(Re-running the failed job directly from the **Tag Release** run's page looks like it should
+work too, but in practice got stuck permanently in a "queued" state with zero jobs ever
+scheduled when we hit this for v0.1.0 — use the manual dispatch above instead.)
 
 ### Required repository configuration
 
