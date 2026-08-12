@@ -144,13 +144,14 @@ See [.github/actions/update-validate-screenshot-tests/README.md](.github/actions
 for requirements and a full workflow example, or [action.yml](.github/actions/update-validate-screenshot-tests/action.yml)
 for every input.
 
-## Nav Graph (experimental, no edges yet)
+## Nav Graph (experimental)
 
 A **separate** plugin id, `io.github.hayatoyagi.compose-preview-toolkit.navgraph` — deliberately
 not bundled into the plugin above, since it pulls in a heavy embedded-Kotlin-compiler dependency
 that only Navigation3 users need (see `nav-graph-gradle-plugin`'s kdoc for why). Statically scans a
-module's own `src/main/kotlin` for Navigation3 `entry<Route> { ... }` registrations via Kotlin PSI
-(no type resolution) and writes a node index:
+module's own `src/main/kotlin` via Kotlin PSI (no type resolution) for Navigation3
+`entry<Route> { ... }` registrations (nodes) and `navigateTo`/`navigate`-shaped calls reachable
+from each one via a bounded-depth call-graph search (edges), and writes a node + edge index:
 
 ```kotlin
 // feature module's build.gradle.kts
@@ -164,11 +165,20 @@ plugins {
 ```
 
 writes `build/generated/composePreviewToolkit/navGraph/debug/ComposePreviewToolkitNavNodeIndex.txt`
-(tab-separated `packageName\tsimpleName\tqualifiedName`), scoped to that module's own sources only.
-Configure via the `composePreviewToolkitNavGraph { ... }` extension's `entryFunctionNames`, in case
-your codebase uses a differently-named `entry`-shaped registration function.
+(tab-separated `packageName\tsimpleName\tqualifiedName`) and `...NavEdgeIndex.txt` (tab-separated
+`sourceRouteQualifiedName\ttargetRouteQualifiedName`), scoped to that module's own sources only.
+Edge detection handles two navigation-wiring shapes through one algorithm, with no special-casing:
+a callback threaded through intermediate composables before finally being invoked far from where
+it's declared (e.g. a feature module's `onProceedClick`, only actually invoked at an app-level
+`NavHost`'s call site), and a direct `navigateTo(...)` call with no callback indirection at all.
+This is deliberately best-effort, name-based analysis, not type resolution: ambiguous callee names
+and calls beyond the configured depth are dropped with a warning rather than guessed, and there is
+no escape-hatch annotation for cases the scanner misses — if a real gap shows up, the scanner
+itself should improve rather than asking you to annotate your real navigation code. Configure via
+the `composePreviewToolkitNavGraph { ... }` extension's `entryFunctionNames`, `navigateCallNames`,
+and `callGraphResolutionDepth`.
 
-### Gallery site (nodes + screenshots, no edges yet)
+### Gallery site (nodes + edges + screenshots)
 
 On an "aggregator" module (typically your app module, the one that actually wires every feature's
 routes into its own `NavDisplay`), configure `graphModules` with every project path that
@@ -185,20 +195,26 @@ composePreviewToolkitNavGraph {
 ./gradlew :app:generateDebugNavGraphSite
 ```
 
-This aggregates each `graphModules` project's own node index and (if that project also applies the
+This aggregates each `graphModules` project's node index and (if that project also applies the
 Phase 1 plugin above) its `ComposePreviewToolkitScreenshotIndex*.txt` + `src/screenshotTestDebug/reference/**/*.png`
 baselines, real Gradle cross-project task dependencies included — running the aggregator's task
 alone is enough to trigger every graph module's own `generateDebugNavGraph`/`kspDebugKotlin` first,
-no manual ordering required. Each node is best-effort paired with a screenshot thumbnail by a
-naming heuristic: strip a configurable suffix (`routeNameSuffixesToStrip`, default
-`["Destination", "Route"]`) from the route's simple name, then case-insensitively substring-match
-the remainder against the screenshot wrapper name. Unmatched routes render as thumbnail-less
-cards — not an error, the expected outcome for most routes.
+no manual ordering required. Edges are additionally (re-)scanned project-wide across every
+`graphModules` project's raw sources in this same task, rather than purely aggregated from each
+module's own edge index — a route's `entry { ... }` registration and the `navigateTo(...)` call
+site that reaches it routinely live in different modules, which a single-module scan can't resolve
+on its own. Each node is best-effort paired with a screenshot thumbnail by a naming heuristic:
+strip a configurable suffix (`routeNameSuffixesToStrip`, default `["Destination", "Route"]`) from
+the route's simple name, then case-insensitively substring-match the remainder against the
+screenshot wrapper name. Unmatched routes render as thumbnail-less cards — not an error, the
+expected outcome for some routes.
 
-Output is a single self-contained `build/composePreviewToolkit/navGraphSite/debug/index.html`
-(thumbnails embedded as base64 data URIs, no separate PNG files to keep in sync) — a thumbnail
-gallery, not yet a graph diagram; edge detection and Mermaid rendering are still to come, see
-`docs/ROADMAP.md`. See `sample/app`/`sample/feature-a`/`sample/feature-b` for a worked example.
+Output is a single self-contained `build/composePreviewToolkit/navGraphSite/debug/index.html` with
+two sections: a Mermaid.js graph diagram of every node and detected edge (Mermaid itself loaded
+from a CDN at page-load time — this affects only the viewer's browser, not build reproducibility),
+and the thumbnail gallery (thumbnails embedded as base64 data URIs, no separate PNG files to keep
+in sync). See `sample/app`/`sample/feature-a`/`sample/feature-b` for a worked example — including
+`feature-b`'s "Restart from Feature A" button, which demonstrates the direct-call edge pattern.
 
 ## Sample App
 
