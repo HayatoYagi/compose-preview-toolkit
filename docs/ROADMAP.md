@@ -47,12 +47,20 @@ Pieces, roughly in build order:
     routinely live in different modules), into a single self-contained gallery `index.html` with
     a Mermaid.js graph diagram alongside the thumbnail cards.
 - **`.github/actions/deploy-nav-graph-site`** (done): a reusable composite action that always
-  runs a nav-graph site-generation task, and optionally deploys the result to GitHub Pages via
-  `actions/deploy-pages` when its `deploy` input is `"true"` — `"false"` (the default) builds
-  only, which is what this repo's own `ci.yml` uses to dogfood the task on every PR without
-  needing Pages permissions. A real deploy needs `pages`/`id-token` permissions and a
-  `github-pages` environment on the calling job, which only a workflow (not a composite action)
-  can set — left to a separate, deploy-dedicated workflow for consumers who want one.
+  runs a nav-graph site-generation task, and optionally publishes the result via its `mode` input
+  (`"build"` default / `"pages"` / `"pr-preview"`). `"build"` only runs the task, which is what
+  this repo's own `ci.yml` uses to dogfood it on every PR without needing any Pages permissions.
+  `"pages"` deploys to a single shared GitHub Pages site via `actions/deploy-pages`, needing
+  `pages`/`id-token` permissions and a `github-pages` environment on the calling job (only a
+  workflow, not a composite action, can set those). `"pr-preview"` wraps
+  `rossjrw/pr-preview-action` to publish a live, per-pull-request preview URL instead — GitHub's
+  Pages Deployments API (`"pages"` mode) only supports one live deployment per repo, so it
+  structurally can't host concurrent PR previews; `"pr-preview"` pushes each PR's site to its own
+  subdirectory on a branch instead, with a sticky PR comment linking to it and automatic teardown
+  on PR close. `"pages"` and `"pr-preview"` require mutually exclusive repo Pages source settings
+  (GitHub Actions vs. Deploy from branch), so a repo picks one as its main-site mechanism — see
+  README.md's "Nav Graph" section for how to combine both. Left to a separate,
+  publish-dedicated workflow for consumers who want either.
 
 Known Phase 2 limitations so far: name-based (not type-resolved) analysis throughout, so results
 are best-effort; node↔screenshot matching is a configurable naming heuristic, not a guaranteed
