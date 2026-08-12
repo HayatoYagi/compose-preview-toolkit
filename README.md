@@ -218,21 +218,50 @@ in sync). See `sample/app`/`sample/feature-a`/`sample/feature-b` for a worked ex
 
 ### Composite GitHub Action
 
+Three mutually exclusive publishing mechanisms, selected by the `mode` input:
+
 ```yaml
 - uses: HayatoYagi/compose-preview-toolkit/.github/actions/deploy-nav-graph-site@v0.1.0
   with:
     site-task: ':app:generateDebugNavGraphSite'
     site-directory: 'app/build/composePreviewToolkit/navGraphSite/debug'
-    deploy: 'true' # omit or set to 'false' to only build the site (e.g. PR dogfooding)
+    mode: 'build' # 'build' (default) | 'pages' | 'pr-preview'
 ```
 
-`deploy: 'true'` wraps `actions/configure-pages` / `actions/upload-pages-artifact` /
-`actions/deploy-pages` around the build step; the calling job needs
-`permissions: { pages: write, id-token: write }` and `environment: github-pages` itself — a
-composite action can't set job-level permissions or environment on its caller. `deploy: 'false'`
-(the default) only runs the Gradle task, which is what this repo's own `ci.yml` uses to dogfood
-`generateDebugNavGraphSite` against `sample/app` on every PR without needing Pages permissions at
-all. See [action.yml](.github/actions/deploy-nav-graph-site/action.yml) for every input.
+- **`mode: 'build'`** (the default): only runs the Gradle task. No Pages permissions needed at
+  all — this is what this repo's own `ci.yml` uses to dogfood `generateDebugNavGraphSite` against
+  `sample/app` on every PR.
+- **`mode: 'pages'`**: additionally wraps `actions/configure-pages` / `actions/upload-pages-artifact`
+  / `actions/deploy-pages` around the build step to deploy `site-directory` to a single, shared
+  GitHub Pages site (one live deployment for the whole repo — every run replaces it). The calling
+  job needs `permissions: { pages: write, id-token: write }` and `environment: github-pages`
+  itself — a composite action can't set job-level permissions or environment on its caller.
+  Requires the repo's **Settings → Pages → Source** set to **GitHub Actions**.
+- **`mode: 'pr-preview'`**: publishes the built site to a per-pull-request preview instead of one
+  shared site, via [`rossjrw/pr-preview-action`](https://github.com/rossjrw/pr-preview-action).
+  Each PR gets its own live URL at `pr-preview/pr-<number>/` (configurable via
+  `pr-preview-umbrella-dir`) on a branch (`pr-preview-branch`, default `gh-pages`), pushed with
+  retry-safe git so concurrent PRs' CI runs don't clobber each other's subdirectories, with a
+  sticky PR comment linking to it. The calling workflow must trigger on `pull_request` events
+  **including `closed`** (e.g. `types: [opened, reopened, synchronize, closed]`) so the preview is
+  torn down when the PR closes — `pr-preview-action` detects the `closed` event itself and
+  switches to cleanup mode; this action skips the build step on that event since there's nothing
+  to publish. The calling job needs `permissions: { contents: write, pull-requests: write }` (or
+  pass a token with equivalent access as `github-token`). Requires the repo's
+  **Settings → Pages → Source** set to **Deploy from branch** pointed at `pr-preview-branch`.
+
+  **Caveat if you also want a persisted "main" site**: GitHub Pages' source setting
+  (**Deploy from branch** vs **GitHub Actions**) is repo-wide, not per-workflow, so `mode: 'pages'`
+  (which requires the **GitHub Actions** source) and `mode: 'pr-preview'` (which requires
+  **Deploy from branch**) cannot both publish to the *same* repo's Pages site — you have to pick
+  one as your main-site mechanism. If you want per-PR previews *and* a persisted main deployment,
+  deploy the main site with a branch-based action too (e.g.
+  [`JamesIves/github-pages-deploy-action`](https://github.com/JamesIves/github-pages-deploy-action)
+  pushing to the same `pr-preview-branch`), and pass it `clean-exclude: pr-preview` (matching
+  `pr-preview-umbrella-dir`) so the main deploy doesn't wipe currently-live PR previews, and
+  `force: false` so it doesn't force-push over them either.
+
+See [action.yml](.github/actions/deploy-nav-graph-site/action.yml) for every input.
 
 ## Sample App
 
