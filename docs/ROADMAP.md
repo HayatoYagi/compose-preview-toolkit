@@ -13,7 +13,7 @@
 Known Phase 1 limitations: `debug` build type only; tracks an alpha AGP feature
 (`com.android.compose.screenshot`), so upstream breaking changes may require a plugin bump.
 
-## Phase 2 — navigation graph + screenshot site (in progress)
+## Phase 2 — navigation graph + screenshot site (done)
 
 Goal: statically analyze a Jetpack Compose Navigation3 navigation graph and render it as a static
 site — each screen node linked to its already-generated screenshot baseline — deployed to GitHub
@@ -36,17 +36,23 @@ Pieces, roughly in build order:
     is deliberately no escape-hatch annotation for cases the scanner misses — if a real gap shows
     up, the scanner itself should improve; this toolkit doesn't ask consumers to modify their real
     navigation code just to make graph generation work.
-- **`nav-graph-gradle-plugin`** (node extraction + gallery site done, edges in progress): a
-  separate plugin id (`io.github.hayatoyagi.compose-preview-toolkit.navgraph`) from Phase 1's,
-  since it transitively depends on a heavy embedded Kotlin compiler frontend that only Navigation3
-  users need.
-  - `generateDebugNavGraph`: runs the node scanner over a module's own sources.
-  - `generateDebugNavGraphSite`: aggregates node indexes (and, once wired in, edges) plus Phase 1's
-    screenshot indexes/baselines across a configured set of modules into a single self-contained
-    gallery `index.html`. Currently a thumbnail gallery only; rendering edges as an actual graph
-    (e.g. Mermaid.js) is the next piece.
-- **Deployment** (not started): a second reusable composite action (or workflow) wrapping
-  `actions/deploy-pages` for consumers who want the gallery site published in their own CI.
+- **`nav-graph-gradle-plugin`** (done): a separate plugin id
+  (`io.github.hayatoyagi.compose-preview-toolkit.navgraph`) from Phase 1's, since it transitively
+  depends on a heavy embedded Kotlin compiler frontend that only Navigation3 users need.
+  - `generateDebugNavGraph`: runs the node and edge scanners over a module's own sources.
+  - `generateDebugNavGraphSite`: aggregates node indexes plus Phase 1's screenshot
+    indexes/baselines across a configured set of modules, and re-scans every configured module's
+    combined sources project-wide for edges (a module-local edge index alone misses most real
+    edges, since a route's `entry {}` registration and the `navigateTo(...)` call reaching it
+    routinely live in different modules), into a single self-contained gallery `index.html` with
+    a Mermaid.js graph diagram alongside the thumbnail cards.
+- **`.github/actions/deploy-nav-graph-site`** (done): a reusable composite action that always
+  runs a nav-graph site-generation task, and optionally deploys the result to GitHub Pages via
+  `actions/deploy-pages` when its `deploy` input is `"true"` — `"false"` (the default) builds
+  only, which is what this repo's own `ci.yml` uses to dogfood the task on every PR without
+  needing Pages permissions. A real deploy needs `pages`/`id-token` permissions and a
+  `github-pages` environment on the calling job, which only a workflow (not a composite action)
+  can set — left to a separate, deploy-dedicated workflow for consumers who want one.
 
 Known Phase 2 limitations so far: name-based (not type-resolved) analysis throughout, so results
 are best-effort; node↔screenshot matching is a configurable naming heuristic, not a guaranteed
