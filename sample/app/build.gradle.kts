@@ -9,16 +9,13 @@ plugins {
     // somewhere (all requests in one `plugins{}` block resolve together before any of them apply).
     alias(libs.plugins.ksp) apply false
     alias(libs.plugins.screenshot) apply false
-    // Written exactly as a real consumer would write it. This always targets the version
-    // currently under local development (see sample/settings.gradle.kts for why that's
-    // permanently ahead of whatever's actually published) — resolves via `mavenLocal()` after
-    // running the publish step described in the README. Bump alongside the root
-    // gradle.properties `version=` whenever that changes.
-    id("io.github.hayatoyagi.compose-preview-toolkit") version "0.2.0"
+    // A version-catalog-based consumer (the norm this sample already follows for every other
+    // plugin) would declare a newly-adopted third-party plugin exactly this way.
+    alias(libs.plugins.composePreviewToolkit)
     // Separate plugin id from the one above (see nav-graph-gradle-plugin's kdoc for why) — applied
     // here too since `app` wires FeatureARoute/FeatureBRoute into its own NavDisplay and therefore
     // has its own `entry<HomeRoute> {}` registration worth including in a node index.
-    id("io.github.hayatoyagi.compose-preview-toolkit.navgraph") version "0.2.0"
+    alias(libs.plugins.composePreviewToolkitNavGraph)
 }
 
 android {
