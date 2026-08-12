@@ -1,5 +1,3 @@
-import com.vanniktech.maven.publish.SonatypeHost
-
 plugins {
     alias(libs.plugins.kotlinJvm)
     alias(libs.plugins.mavenPublish)
@@ -17,7 +15,9 @@ dependencies {
 }
 
 mavenPublishing {
-    publishToMavenCentral(SonatypeHost.CENTRAL_PORTAL)
+    // SonatypeHost was removed from the DSL in mavenPublish 0.34.0 (OSSRH shutdown) — Central
+    // Portal is now the only target, so a no-arg call is the replacement.
+    publishToMavenCentral()
     // Only when a signing key is actually configured (CI sets ORG_GRADLE_PROJECT_signingInMemoryKey,
     // exposed here as the "signingInMemoryKey" project property) — otherwise `publishToMavenLocal`
     // for local development would require every contributor to have a GPG key set up.
