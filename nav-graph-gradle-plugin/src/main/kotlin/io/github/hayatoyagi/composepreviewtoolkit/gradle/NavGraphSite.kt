@@ -1,5 +1,6 @@
 package io.github.hayatoyagi.composepreviewtoolkit.gradle
 
+import io.github.hayatoyagi.composepreviewtoolkit.navgraph.psi.NavEdge
 import io.github.hayatoyagi.composepreviewtoolkit.navgraph.psi.NavNode
 import java.io.File
 
@@ -106,6 +107,72 @@ fun buildGalleryEntries(
         }
 
 /**
+ * Renders [nodes] + [edges] as a Mermaid.js `graph TD` flowchart definition (the raw text that
+ * goes inside a `<pre class="mermaid">...</pre>` block, without the surrounding HTML), one line
+ * per node declaration followed by one line per edge.
+ *
+ * **Node IDs are deliberately NOT the route's qualified/simple name.** Mermaid flowchart node IDs
+ * have their own restricted syntax (they can't safely contain `.`, generics-looking `<>`, or other
+ * punctuation that a fully-qualified Kotlin name routinely has, e.g. `com.example.ConsultRoute.Detail`
+ * would be parsed as several chained node references rather than one id) — so this assigns each
+ * node an opaque, always-safe positional id (`n0`, `n1`, ...) derived purely from [nodes]' index,
+ * and puts the actual route name in the node's quoted *label* instead (`n0["FeatureARoute"]`),
+ * which supports far more characters than an id ever could. [nodes] is expected to already be
+ * deduplicated/sorted (see [buildGalleryEntries]) so the id assignment is deterministic across
+ * repeated runs with the same input.
+ *
+ * [edges] referencing a route not present in [nodes] are silently dropped rather than rendered
+ * with a dangling id — this is defensive, not expected to trigger against real scanner output,
+ * since every [NavEdge] the scanner emits has both ends resolved against the same node registry.
+ *
+ * No assumption of acyclicity anywhere here: a `sourceRouteQualifiedName`/`targetRouteQualifiedName`
+ * pair forming a cycle (e.g. the real sample's `FeatureBRoute` → `FeatureARoute` alongside
+ * `FeatureARoute` → `FeatureBRoute`) is just two more edge lines: Mermaid flowcharts render cycles
+ * natively, and this function never tries to topologically sort or otherwise reason about DAG-ness.
+ */
+fun buildMermaidGraph(
+    nodes: List<NavNode>,
+    edges: List<NavEdge>,
+): String {
+    val idByQualifiedName = nodes.withIndex().associate { (index, node) -> node.qualifiedName to "n$index" }
+    return buildString {
+        append("graph TD;\n")
+        nodes.forEachIndexed { index, node ->
+            append("n$index[\"${node.simpleName.mermaidLabel()}\"]").append(";\n")
+        }
+        edges.distinct().forEach { edge ->
+            val sourceId = idByQualifiedName[edge.sourceRouteQualifiedName] ?: return@forEach
+            val targetId = idByQualifiedName[edge.targetRouteQualifiedName] ?: return@forEach
+            append("$sourceId --> $targetId").append(";\n")
+        }
+    }
+}
+
+/**
+ * Escapes [this] for safe use as a Mermaid quoted node label ([buildMermaidGraph]) that is itself
+ * embedded as literal HTML text (inside `<pre class="mermaid">`).
+ *
+ * Two distinct concerns, handled in this order:
+ * 1. A literal `"` in the source text would prematurely close Mermaid's own quoted-label syntax
+ *    (`n0["fo"o"]` is not one label) — Mermaid has no backslash-escape for this, so the only safe
+ *    option is to not let a literal `"` reach the label text at all; replaced with `'`. Newlines
+ *    are likewise replaced with spaces (a label can't contain one).
+ * 2. `&`, `<`, `>` need standard HTML-entity escaping because this text is embedded directly as
+ *    HTML body text: the browser decodes those entities back to literal characters before handing
+ *    the element's text content to Mermaid.js, so (unlike step 1) this round-trips safely and also
+ *    prevents a route name from ever being interpreted as markup.
+ *
+ * In practice a route's `simpleName` is a plain Kotlin identifier and never hits any of this, but
+ * nothing here assumes that.
+ */
+private fun String.mermaidLabel(): String =
+    replace('"', '\'')
+        .replace('\n', ' ')
+        .replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+
+/**
  * One rendered gallery card's content, already reduced to strings — [thumbnailDataUri] is a full
  * `data:image/png;base64,...` URI (or `null` for an unmatched route), computed by the task from a
  * [GalleryEntry.thumbnail] file's bytes. Keeping [buildGallerySiteHtml] operating on this instead
@@ -118,13 +185,25 @@ data class GalleryCard(
 )
 
 /**
- * Renders [cards] as a single self-contained static HTML page: a thumbnail gallery grid, one card
- * per node, no edges/graph drawing — edge detection doesn't exist yet, see the Phase 2 design doc
- * for the full nav graph design. Thumbnails are embedded inline as base64 data URIs rather than
- * copied alongside `index.html` as separate files, so the whole site is exactly one file — simpler
- * to review/host for a gallery than keeping an `index.html` + PNGs directory in sync.
+ * Renders [cards] + [mermaidGraph] as a single self-contained static HTML page with two sections
+ * driven by the same underlying node/edge/thumbnail data, kept visually separate rather than
+ * merged into one element (per the Phase 2 design doc: cramming thumbnails inside Mermaid node
+ * shapes is fragile for a v1):
+ * 1. A Mermaid.js `graph TD` flowchart (see [buildMermaidGraph]) showing the actual nav graph
+ *    structure — every node, including ones with no matched screenshot, plus every detected edge.
+ *    Mermaid itself is loaded from a CDN at page-load time in the viewer's browser (per the design
+ *    doc's explicit choice) — this has no effect on build reproducibility, only on what a viewer
+ *    sees when they later open the page with network access.
+ * 2. The pre-existing thumbnail gallery grid, one card per node.
+ *
+ * Thumbnails are embedded inline as base64 data URIs rather than copied alongside `index.html` as
+ * separate files, so the whole site is exactly one file — simpler to review/host for a gallery
+ * than keeping an `index.html` + PNGs directory in sync.
  */
-fun buildGallerySiteHtml(cards: List<GalleryCard>): String {
+fun buildGallerySiteHtml(
+    cards: List<GalleryCard>,
+    mermaidGraph: String,
+): String {
     val cardsHtml = cards.joinToString("\n") { card -> card.toCardHtml() }
     return """
         <!DOCTYPE html>
@@ -135,7 +214,10 @@ fun buildGallerySiteHtml(cards: List<GalleryCard>): String {
         <style>
         body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; margin: 0; padding: 32px; background: #f5f5f7; color: #1d1d1f; }
         h1 { font-size: 22px; margin: 0 0 4px; }
+        h2 { font-size: 17px; margin: 0 0 12px; }
         .subtitle { color: #6e6e73; margin: 0 0 24px; }
+        section { margin-bottom: 40px; }
+        .graph-container { background: #fff; border-radius: 12px; padding: 20px; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12); overflow-x: auto; }
         .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 16px; }
         .card { background: #fff; border-radius: 12px; overflow: hidden; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12); display: flex; flex-direction: column; }
         .thumbnail { width: 100%; height: 160px; object-fit: cover; display: block; background: #eaeaec; }
@@ -148,9 +230,22 @@ fun buildGallerySiteHtml(cards: List<GalleryCard>): String {
         <body>
         <h1>Nav Graph Gallery</h1>
         <p class="subtitle">${cards.size} route(s)</p>
+        <section>
+        <h2>Navigation Graph</h2>
+        <div class="graph-container">
+        <pre class="mermaid">
+        $mermaidGraph
+        </pre>
+        </div>
+        </section>
+        <section>
+        <h2>Screenshots</h2>
         <div class="grid">
         $cardsHtml
         </div>
+        </section>
+        <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+        <script>mermaid.initialize({ startOnLoad: true, securityLevel: "loose" });</script>
         </body>
         </html>
     """.trimIndent()
