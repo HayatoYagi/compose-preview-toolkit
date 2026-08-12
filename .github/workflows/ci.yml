@@ -54,3 +54,14 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           working-directory: sample
+
+      # Build-only dogfooding: exercises generateDebugNavGraphSite on every PR without deploying
+      # anywhere, so a broken action.yml or a broken plugin/analyzer change surfaces here. A real
+      # Pages deploy (deploy: true) needs pages/id-token permissions and a github-pages
+      # environment this job doesn't have, so it's left to a separate, deploy-dedicated workflow.
+      - name: Build sample nav graph site
+        uses: ./.github/actions/deploy-nav-graph-site
+        with:
+          working-directory: sample
+          site-task: ':app:generateDebugNavGraphSite'
+          site-directory: sample/app/build/composePreviewToolkit/navGraphSite/debug

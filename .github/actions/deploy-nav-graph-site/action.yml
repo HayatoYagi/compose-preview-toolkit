@@ -1,0 +1,69 @@
+name: 'Build & Deploy Nav Graph Site'
+description: >-
+  Runs a compose-preview-toolkit nav-graph site generation task (generateDebugNavGraphSite),
+  optionally deploying the result to GitHub Pages. Building always happens; deploying is opt-in
+  via the deploy input, so the same action can be used both for build-only CI dogfooding (every
+  PR) and for a real Pages deploy (e.g. a workflow triggered only on pushes to main).
+author: 'HayatoYagi'
+
+inputs:
+  working-directory:
+    description: >-
+      Directory containing the gradlew invoked by this action. Defaults to the repo root; set
+      this if the site-generating module lives in a separate Gradle build (own gradlew), e.g.
+      this repo's own sample/ (see sample/settings.gradle.kts for why it's separate).
+    required: false
+    default: '.'
+  site-task:
+    description: >-
+      Gradle task that generates the site, e.g. ":app:generateDebugNavGraphSite". Run relative to
+      working-directory.
+    required: true
+  site-directory:
+    description: >-
+      Path to the generated site directory (containing index.html), relative to the repository
+      root — not working-directory — since actions/upload-pages-artifact resolves its own path
+      input relative to the workspace root. E.g. "sample/app/build/composePreviewToolkit/navGraphSite/debug".
+    required: true
+  gradle-args:
+    description: 'Extra arguments appended to the Gradle invocation (e.g. -Djava.net.preferIPv4Stack=true).'
+    required: false
+    default: ''
+  deploy:
+    description: >-
+      Set to "true" to also deploy site-directory to GitHub Pages after building it. When "true",
+      the calling job must additionally set `permissions: { pages: write, id-token: write }` and
+      `environment: github-pages` itself — a composite action cannot set job-level permissions or
+      environment on its caller, only the workflow that uses this action can. When "false"
+      (default), this action only builds the site (useful for dogfooding it on every PR without
+      needing Pages permissions at all).
+    required: false
+    default: 'false'
+
+outputs:
+  page-url:
+    description: 'URL of the deployed Pages site. Only set when deploy is "true".'
+    value: ${{ steps.deployment.outputs.page_url }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Generate nav graph site
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: ./gradlew ${{ inputs.site-task }} ${{ inputs.gradle-args }}
+
+    - name: Configure Pages
+      if: inputs.deploy == 'true'
+      uses: actions/configure-pages@v5
+
+    - name: Upload site artifact
+      if: inputs.deploy == 'true'
+      uses: actions/upload-pages-artifact@v3
+      with:
+        path: ${{ inputs.site-directory }}
+
+    - name: Deploy to GitHub Pages
+      if: inputs.deploy == 'true'
+      id: deployment
+      uses: actions/deploy-pages@v4

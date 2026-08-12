@@ -216,6 +216,24 @@ and the thumbnail gallery (thumbnails embedded as base64 data URIs, no separate 
 in sync). See `sample/app`/`sample/feature-a`/`sample/feature-b` for a worked example — including
 `feature-b`'s "Restart from Feature A" button, which demonstrates the direct-call edge pattern.
 
+### Composite GitHub Action
+
+```yaml
+- uses: HayatoYagi/compose-preview-toolkit/.github/actions/deploy-nav-graph-site@v0.1.0
+  with:
+    site-task: ':app:generateDebugNavGraphSite'
+    site-directory: 'app/build/composePreviewToolkit/navGraphSite/debug'
+    deploy: 'true' # omit or set to 'false' to only build the site (e.g. PR dogfooding)
+```
+
+`deploy: 'true'` wraps `actions/configure-pages` / `actions/upload-pages-artifact` /
+`actions/deploy-pages` around the build step; the calling job needs
+`permissions: { pages: write, id-token: write }` and `environment: github-pages` itself — a
+composite action can't set job-level permissions or environment on its caller. `deploy: 'false'`
+(the default) only runs the Gradle task, which is what this repo's own `ci.yml` uses to dogfood
+`generateDebugNavGraphSite` against `sample/app` on every PR without needing Pages permissions at
+all. See [action.yml](.github/actions/deploy-nav-graph-site/action.yml) for every input.
+
 ## Sample App
 
 `sample/` is a minimal, multi-module Android app demonstrating end-to-end usage (not published).
@@ -250,15 +268,14 @@ Both shapes are found by the exact same call-graph algorithm; see `nav-graph-psi
 
 ## Roadmap
 
-- **Navigation graph + screenshot site (in progress)**: statically extract a Navigation3 nav
-  graph and pair each screen node with its generated screenshot baseline, publishing a static
-  site to GitHub Pages for quick visual review of the whole app's navigation flow. Node
-  extraction, cross-module aggregation, and the thumbnail-gallery site
+- **Navigation graph + screenshot site (done)**: statically extract a Navigation3 nav graph and
+  pair each screen node with its generated screenshot baseline, rendered as a self-contained
+  Mermaid graph + thumbnail gallery site, deployable to GitHub Pages. Node extraction, edge
+  detection, cross-module aggregation, the gallery/graph site, and the deploy action
   (`io.github.hayatoyagi.compose-preview-toolkit.navgraph` plugin, `nav-graph-psi-analyzer`, the
-  `generateDebugNavGraph`/`generateDebugNavGraphSite` tasks) are available now — see "Nav Graph"
-  above and `sample/app`/`sample/feature-a`/`sample/feature-b`. Edge detection and Mermaid graph
-  rendering (turning the gallery into an actual graph diagram) are not yet implemented, nor is the
-  GitHub Pages deploy action itself; see `docs/ROADMAP.md` for the full design and PR sequence.
+  `generateDebugNavGraph`/`generateDebugNavGraphSite` tasks,
+  `.github/actions/deploy-nav-graph-site`) are all available now — see "Nav Graph" above and
+  `sample/app`/`sample/feature-a`/`sample/feature-b`. See `docs/ROADMAP.md` for the full design.
 
 ## Contributing
 
