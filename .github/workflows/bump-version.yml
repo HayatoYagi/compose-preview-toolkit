@@ -37,17 +37,16 @@ jobs:
 
       # sample/app, sample/feature-a, and sample/feature-b each hardcode the plugin version(s)
       # they apply (see the comment in sample/settings.gradle.kts explaining why sample is a
-      # separate build) — keep them all in sync with every bump. sample/app applies both plugin
-      # ids; feature-a/feature-b apply only the navgraph one.
+      # separate build) — keep them all in sync with every bump. All three apply both plugin ids
+      # (each module has its own @ScreenshotPreview-annotated screen, and its own entry<X> {}
+      # registration worth including in the nav graph), so both patterns run against all three
+      # files.
       - name: Update sample plugin versions
         run: |
           sed -i \
             -e 's/id("io.github.hayatoyagi.compose-preview-toolkit") version ".*"/id("io.github.hayatoyagi.compose-preview-toolkit") version "${{ steps.version.outputs.new_version }}"/' \
             -e 's/id("io.github.hayatoyagi.compose-preview-toolkit.navgraph") version ".*"/id("io.github.hayatoyagi.compose-preview-toolkit.navgraph") version "${{ steps.version.outputs.new_version }}"/' \
-            sample/app/build.gradle.kts
-          sed -i \
-            's/id("io.github.hayatoyagi.compose-preview-toolkit.navgraph") version ".*"/id("io.github.hayatoyagi.compose-preview-toolkit.navgraph") version "${{ steps.version.outputs.new_version }}"/' \
-            sample/feature-a/build.gradle.kts sample/feature-b/build.gradle.kts
+            sample/app/build.gradle.kts sample/feature-a/build.gradle.kts sample/feature-b/build.gradle.kts
 
       - name: Create release PR
         uses: peter-evans/create-pull-request@v7
