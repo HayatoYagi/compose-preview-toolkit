@@ -13,9 +13,9 @@ plugins {
     // comment on the same id. Applied here too (not just on sample/app) so the gallery site's
     // FeatureBRoute node gets a real screenshot thumbnail via the naming heuristic, same as
     // HomeRoute already does — see README.md's Sample App section.
-    id("io.github.hayatoyagi.compose-preview-toolkit") version "0.1.0"
+    id("io.github.hayatoyagi.compose-preview-toolkit") version "0.2.0"
     // See sample/app/build.gradle.kts for why this is a separate plugin id from Phase 1's.
-    id("io.github.hayatoyagi.compose-preview-toolkit.navgraph") version "0.1.0"
+    id("io.github.hayatoyagi.compose-preview-toolkit.navgraph") version "0.2.0"
 }
 
 android {

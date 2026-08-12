@@ -14,11 +14,11 @@ plugins {
     // permanently ahead of whatever's actually published) — resolves via `mavenLocal()` after
     // running the publish step described in the README. Bump alongside the root
     // gradle.properties `version=` whenever that changes.
-    id("io.github.hayatoyagi.compose-preview-toolkit") version "0.1.0"
+    id("io.github.hayatoyagi.compose-preview-toolkit") version "0.2.0"
     // Separate plugin id from the one above (see nav-graph-gradle-plugin's kdoc for why) — applied
     // here too since `app` wires FeatureARoute/FeatureBRoute into its own NavDisplay and therefore
     // has its own `entry<HomeRoute> {}` registration worth including in a node index.
-    id("io.github.hayatoyagi.compose-preview-toolkit.navgraph") version "0.1.0"
+    id("io.github.hayatoyagi.compose-preview-toolkit.navgraph") version "0.2.0"
 }
 
 android {
