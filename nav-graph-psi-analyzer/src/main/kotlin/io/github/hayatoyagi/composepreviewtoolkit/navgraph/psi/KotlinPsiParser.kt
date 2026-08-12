@@ -16,8 +16,8 @@ import java.io.File
  * a [KtFile], without requiring callers to know any of that setup themselves.
  *
  * This is purely syntactic (no type resolution) — the same technique tools like ktlint/detekt use
- * to get a [KtFile] outside of a real compiler invocation, per the Phase 2 design doc's explicit
- * choice to avoid the Kotlin Analysis API (which needs a full classpath and is far more brittle).
+ * to get a [KtFile] outside of a real compiler invocation, deliberately avoiding the Kotlin
+ * Analysis API (which needs a full classpath and is far more brittle).
  *
  * A single instance is meant to be reused across many [parse] calls (e.g. once per Gradle task
  * execution scanning an entire project's sources) — creating a [KotlinCoreEnvironment] is
@@ -26,8 +26,7 @@ import java.io.File
  *
  * Opts in to two Kotlin-compiler-internal APIs that this standalone-parsing setup requires:
  * [K1Deprecation] (`KotlinCoreEnvironment.createForProduction` is a K1-frontend API, which is
- * exactly what's wanted here since only syntax/PSI is needed, not full K2 semantic resolution —
- * see the Phase 2 design doc's explicit choice to avoid the Analysis API) and
+ * exactly what's wanted here since only syntax/PSI is needed, not full K2 semantic resolution) and
  * [CompilerConfiguration.Internals] (needed to even construct a bare [CompilerConfiguration]).
  */
 @OptIn(K1Deprecation::class, CompilerConfiguration.Internals::class)

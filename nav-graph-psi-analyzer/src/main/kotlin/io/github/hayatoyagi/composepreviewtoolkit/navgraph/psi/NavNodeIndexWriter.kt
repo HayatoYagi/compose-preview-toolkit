@@ -42,7 +42,7 @@ fun writeNavNodeIndex(
  * [writeNavNodeIndex]/[formatNavNodeIndex] back into [NavNode]s. The counterpart reader needed by
  * cross-module aggregation (`nav-graph-gradle-plugin`'s site-generation task reads back node
  * indexes written by other modules' `generateDebugNavGraph` task runs), mirroring how
- * `ScreenshotPreviewProcessorProvider`'s `PreviewEntry` format is parsed back on the Phase 1 side
+ * `ScreenshotPreviewProcessorProvider`'s `PreviewEntry` format is parsed back in `gradle-plugin`
  * (see `GenerateScreenshotPreviewTests`/`CleanupScreenshotPreviewReferences`). Blank lines are
  * skipped so trailing newlines don't produce a spurious malformed-line failure.
  */

@@ -5,13 +5,13 @@ import io.github.hayatoyagi.composepreviewtoolkit.navgraph.psi.NavNode
 import java.io.File
 
 /**
- * A single entry from Phase 1's `ComposePreviewToolkitScreenshotIndex*.txt` (see
- * `ScreenshotPreviewProcessorProvider`'s `PreviewEntry`/`writeIndex`), tab-separated
- * `packageName\twrapperName\tcallExpression`. Phase 1's own format is trivial enough (three
- * columns, same convention as the nav node index) that this module parses it directly rather than
- * taking a compile dependency on `ksp-processor`'s private `PreviewEntry` type, matching
+ * A single entry from the screenshot-testing plugin's `ComposePreviewToolkitScreenshotIndex*.txt`
+ * (see `ScreenshotPreviewProcessorProvider`'s `PreviewEntry`/`writeIndex`), tab-separated
+ * `packageName\twrapperName\tcallExpression`. That format is trivial enough (three columns, same
+ * convention as the nav node index) that this module parses it directly rather than taking a
+ * compile dependency on `ksp-processor`'s private `PreviewEntry` type, matching
  * `GenerateScreenshotPreviewTests`/`CleanupScreenshotPreviewReferences`'s own local `PreviewEntry`
- * copies in the Phase 1 plugin.
+ * copies in `gradle-plugin`.
  */
 data class ScreenshotIndexEntry(
     val packageName: String,
@@ -187,13 +187,12 @@ data class GalleryCard(
 /**
  * Renders [cards] + [mermaidGraph] as a single self-contained static HTML page with two sections
  * driven by the same underlying node/edge/thumbnail data, kept visually separate rather than
- * merged into one element (per the Phase 2 design doc: cramming thumbnails inside Mermaid node
- * shapes is fragile for a v1):
+ * merged into one element: cramming thumbnails inside Mermaid node shapes is fragile.
  * 1. A Mermaid.js `graph TD` flowchart (see [buildMermaidGraph]) showing the actual nav graph
  *    structure — every node, including ones with no matched screenshot, plus every detected edge.
- *    Mermaid itself is loaded from a CDN at page-load time in the viewer's browser (per the design
- *    doc's explicit choice) — this has no effect on build reproducibility, only on what a viewer
- *    sees when they later open the page with network access.
+ *    Mermaid itself is loaded from a CDN at page-load time in the viewer's browser — this has no
+ *    effect on build reproducibility, only on what a viewer sees when they later open the page
+ *    with network access.
  * 2. The pre-existing thumbnail gallery grid, one card per node.
  *
  * Thumbnails are embedded inline as base64 data URIs rather than copied alongside `index.html` as

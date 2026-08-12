@@ -21,12 +21,12 @@ import org.gradle.api.tasks.TaskAction
 import java.util.Base64
 
 /**
- * Aggregates node indexes ([nodeIndexFiles]) and Phase 1 screenshot indexes/baselines
+ * Aggregates node indexes ([nodeIndexFiles]) and screenshot indexes/baselines
  * ([screenshotIndexFiles]/[screenshotReferenceImages]) — written by each `graphModules` project's
- * own `generateDebugNavGraph` task / Phase 1 KSP processor — across every project configured via
- * `composePreviewToolkitNavGraph { graphModules.set(...) }`, then renders a single self-contained
- * `index.html` with both a Mermaid.js nav graph diagram and a thumbnail gallery
- * ([buildGallerySiteHtml]).
+ * own `generateDebugNavGraph` task / the screenshot-testing plugin's KSP processor — across every
+ * project configured via `composePreviewToolkitNavGraph { graphModules.set(...) }`, then renders a
+ * single self-contained `index.html` with both a Mermaid.js nav graph diagram and a thumbnail
+ * gallery ([buildGallerySiteHtml]).
  *
  * ## Why edges are (re-)scanned here rather than purely aggregated from [edgeIndexFiles]
  *
@@ -40,9 +40,8 @@ import java.util.Base64
  * direct-call pattern). A single-module scan can supply neither side of that unless both happen to
  * live in the same module, which never occurs in `compose-preview-toolkit-sample`. Confirmed
  * empirically while implementing this task: wiring only [edgeIndexFiles] produced zero edges for
- * all three of the sample's real, verified-working edges. This matches the Phase 2 design doc's
- * own explicit scope choice ("検出のスキャン範囲はプロジェクト全体とする") — edge detection was
- * always meant to run over the whole project's sources at once, not module-by-module.
+ * all three of the sample's real, verified-working edges. Edge detection was always meant to run
+ * over the whole project's sources at once, not module-by-module.
  *
  * So this task additionally re-parses the raw `.kt` sources of every `graphModules` project
  * ([edgeSourceFiles]) and runs one project-wide [NavEdgeScanner.scan] call over all of them
