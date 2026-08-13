@@ -23,6 +23,13 @@ covers build-only CI dogfooding (every PR, the default), a real Pages deploy, or
     synchronize, closed]`) so the preview is torn down when the PR closes. Requires the repo's
     **Settings → Pages → Source** set to **Deploy from branch** pointed at `pr-preview-branch`.
 
+If your project also generates screenshot baselines (e.g. via this repo's own screenshot-testing
+plugin) and you want the gallery thumbnails to reflect the latest ones, run whatever step updates
+those baselines **before** this action in the same job — this action just reads whatever reference
+images exist on disk at the time it runs, it doesn't regenerate them itself. Calling it from a
+separate, independently-triggered workflow risks racing your baseline-update step and publishing a
+site with stale thumbnails.
+
 ## Usage
 
 ```yaml
@@ -67,17 +74,18 @@ pushing to the same `pr-preview-branch`), and pass it `clean-exclude: pr-preview
 ## How this repo uses it
 
 This repo dogfoods both a persisted main site and PR previews for `sample/app`'s generated nav
-graph, all without ever setting `mode: 'pages'`:
+graph, all without ever setting `mode: 'pages'`. All three steps below live in `ci.yml`'s single
+job, positioned after its screenshot-baseline update step (see the note above on why) — not a
+separately-triggered workflow:
 
-- `ci.yml`'s single job calls this action with `mode: 'build'` on every push/PR (build-only
-  validation, no Pages involved — unaffected by anything below).
-- That same job also calls this action with `mode: 'pr-preview'` when triggered by a
-  `pull_request` event, positioned after the screenshot-baseline update step so the preview always
-  reflects freshly-committed baselines rather than racing a separately-triggered workflow. A
-  further step deploys the identical, already-built `site-directory` to the `gh-pages` branch root
-  via `JamesIves/github-pages-deploy-action` (`clean-exclude: pr-preview`, `force: false`) whenever
-  the push is to `main` — the branch-based persisted-main-site mechanism described in the caveat
-  above, sharing `gh-pages` with the pr-preview deploys instead of conflicting with them.
+- On `push` to `main`: calls this action with `mode: 'build'` (build-only validation, no Pages
+  involved), then deploys that same `site-directory` to the `gh-pages` branch root via
+  `JamesIves/github-pages-deploy-action` (`clean-exclude: pr-preview`, `force: false`) — the
+  branch-based persisted-main-site mechanism described in the caveat above, sharing `gh-pages` with
+  the pr-preview deploys instead of conflicting with them.
+- On `pull_request`: calls this action with `mode: 'pr-preview'` instead — it builds and deploys
+  the preview in one step, so a separate `mode: 'build'` call isn't needed (and would just build
+  the same thing twice).
 - [`nav-graph-pr-preview-teardown.yml`](../../workflows/nav-graph-pr-preview-teardown.yml) calls
   this action with `mode: 'pr-preview'` on `pull_request: closed` to tear the preview down — kept
   as its own minimal workflow since teardown needs none of the Gradle/JDK/mavenLocal setup the
