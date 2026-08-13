@@ -27,12 +27,12 @@ import org.gradle.api.tasks.TaskAction
  * indexes across multiple modules into one graph happens in [GenerateDebugNavGraphSite].
  *
  * [NavEdgeScanner]'s warnings are surfaced via this task's own [org.gradle.api.logging.Logger]
- * rather than failing the build, per the Phase 2 design doc's resilience philosophy: a nav edge
- * candidate the scanner couldn't resolve is a "best-effort scan gave up" case, not a build error.
+ * rather than failing the build: a nav edge candidate the scanner couldn't resolve is a
+ * "best-effort scan gave up" case, not a build error.
  *
  * Deterministic given its declared inputs (source files, `entryFunctionNames`,
  * `navigateCallNames`, `callGraphResolutionDepth`), so this is safe to cache, matching
- * `GenerateScreenshotPreviewTests`'s reasoning in the Phase 1 plugin.
+ * `GenerateScreenshotPreviewTests`'s reasoning in `gradle-plugin`.
  */
 @CacheableTask
 abstract class GenerateDebugNavGraph : DefaultTask() {

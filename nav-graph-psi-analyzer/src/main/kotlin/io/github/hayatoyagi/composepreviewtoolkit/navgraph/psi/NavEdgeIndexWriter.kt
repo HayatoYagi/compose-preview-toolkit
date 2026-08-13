@@ -5,9 +5,11 @@ import java.io.Writer
 
 /**
  * Base file name for the edge index, mirroring [NAV_NODE_INDEX_FILE_NAME]'s naming convention.
- * No `source(auto|escapeHatch)` third column yet — that's added once the `@NavigatesTo` escape
- * hatch (a separate, later PR) exists to merge against; see the Phase 2 design doc's "マージ"
- * section. Until then every edge in this index came from [NavEdgeScanner]'s automatic detection.
+ * Two tab-separated columns — `sourceRouteQualifiedName`/`targetRouteQualifiedName` (see
+ * [formatNavEdgeIndex]) — with every edge in the index coming from [NavEdgeScanner]'s automatic
+ * detection. There is deliberately no manual-annotation escape hatch for edges the scanner misses:
+ * if a real gap shows up, the scanner itself should improve rather than asking consumers to
+ * annotate their real navigation code.
  */
 const val NAV_EDGE_INDEX_FILE_NAME = "ComposePreviewToolkitNavEdgeIndex"
 

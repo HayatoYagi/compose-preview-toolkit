@@ -43,7 +43,7 @@ jobs:
       # version resolvable via mavenLocal() before it can configure at all. sample/app,
       # sample/feature-a, and sample/feature-b all apply the navgraph plugin id, so
       # nav-graph-gradle-plugin (and its nav-graph-psi-analyzer dependency) publishing is just as
-      # required here as the Phase 1 modules, not optional.
+      # required here as the screenshot-testing plugin's modules, not optional.
       - name: Publish current version to mavenLocal for sample/ to consume
         run: ./gradlew --stacktrace :annotations:publishToMavenLocal :ksp-processor:publishToMavenLocal :gradle-plugin:publishToMavenLocal :nav-graph-psi-analyzer:publishToMavenLocal :nav-graph-gradle-plugin:publishToMavenLocal
 

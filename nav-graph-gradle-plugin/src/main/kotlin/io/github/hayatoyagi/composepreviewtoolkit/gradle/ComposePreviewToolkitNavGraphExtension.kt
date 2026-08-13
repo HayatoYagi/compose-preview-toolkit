@@ -6,9 +6,9 @@ import org.gradle.api.provider.SetProperty
 /**
  * Configuration for the `composePreviewToolkitNavGraph` Gradle extension.
  *
- * Registered under a name distinct from Phase 1's `composePreviewToolkit` extension so a module
- * can apply both plugins at once (e.g. a feature module using both screenshot-test generation and
- * nav-graph extraction) without a naming collision.
+ * Registered under a name distinct from the screenshot-testing plugin's `composePreviewToolkit`
+ * extension so a module can apply both plugins at once (e.g. a feature module using both
+ * screenshot-test generation and nav-graph extraction) without a naming collision.
  */
 abstract class ComposePreviewToolkitNavGraphExtension {
     /**
@@ -21,8 +21,8 @@ abstract class ComposePreviewToolkitNavGraphExtension {
 
     /**
      * Callee simple names treated as `navigateTo`/`navigate`-shaped calls when scanning for nav
-     * graph edges (Step C of the Phase 2 design doc). Defaults to `nav-graph-psi-analyzer`'s
-     * `DEFAULT_NAVIGATE_CALL_NAMES` (`["navigateTo", "navigate"]`).
+     * graph edges. Defaults to `nav-graph-psi-analyzer`'s `DEFAULT_NAVIGATE_CALL_NAMES`
+     * (`["navigateTo", "navigate"]`).
      */
     abstract val navigateCallNames: SetProperty<String>
 

@@ -196,7 +196,7 @@ composePreviewToolkitNavGraph {
 ```
 
 This aggregates each `graphModules` project's node index and (if that project also applies the
-Phase 1 plugin above) its `ComposePreviewToolkitScreenshotIndex*.txt` + `src/screenshotTestDebug/reference/**/*.png`
+`io.github.hayatoyagi.compose-preview-toolkit` plugin above) its `ComposePreviewToolkitScreenshotIndex*.txt` + `src/screenshotTestDebug/reference/**/*.png`
 baselines, real Gradle cross-project task dependencies included — running the aggregator's task
 alone is enough to trigger every graph module's own `generateDebugNavGraph`/`kspDebugKotlin` first,
 no manual ordering required. Edges are additionally (re-)scanned project-wide across every
@@ -261,9 +261,10 @@ this repo is under active development.
 
 `sample/app` is a small Navigation3 app wiring together `sample/feature-a` and `sample/feature-b`
 (each a separate feature module), demonstrating the nav-graph plugin's node extraction and gallery
-site generation (see "Nav Graph" above) alongside Phase 1's screenshot-test generation. Every
-module — `app`, `feature-a`, and `feature-b` — applies both the Phase 1 screenshot-testing plugin
-and the navgraph plugin, so in the generated gallery all three routes get a real thumbnail:
+site generation (see "Nav Graph" above) alongside the `io.github.hayatoyagi.compose-preview-toolkit`
+plugin's screenshot-test generation. Every module — `app`, `feature-a`, and `feature-b` — applies
+both the screenshot-testing plugin and the navgraph plugin, so in the generated gallery all three
+routes get a real thumbnail:
 `HomeRoute` from `HomeScreen`'s `@ScreenshotPreview`-annotated `HomeScreenPreview`, `FeatureARoute`
 from `FeatureAScreen`'s `FeatureAScreenPreview`, and `FeatureBRoute` from `FeatureBScreen`'s
 `FeatureBScreenPreview` — each naming-matched after stripping the `Route` suffix.
@@ -281,17 +282,9 @@ Both shapes are found by the exact same call-graph algorithm; see `nav-graph-psi
 - Only the `debug` build type is supported currently.
 - AGP's Compose Preview Screenshot Testing is still an alpha feature (`0.0.1-alpha1x` as of this
   writing); breaking changes upstream may require a plugin update.
-
-## Roadmap
-
-- **Navigation graph + screenshot site (done)**: statically extract a Navigation3 nav graph and
-  pair each screen node with its generated screenshot baseline, rendered as a self-contained
-  Mermaid graph + thumbnail gallery site, deployable to GitHub Pages. Node extraction, edge
-  detection, cross-module aggregation, the gallery/graph site, and the deploy action
-  (`io.github.hayatoyagi.compose-preview-toolkit.navgraph` plugin, `nav-graph-psi-analyzer`, the
-  `generateDebugNavGraph`/`generateDebugNavGraphSite` tasks,
-  `.github/actions/deploy-nav-graph-site`) are all available now — see "Nav Graph" above and
-  `sample/app`/`sample/feature-a`/`sample/feature-b`. See `docs/ROADMAP.md` for the full design.
+- The nav-graph plugin's node/edge analysis is name-based, not type-resolved, throughout, so
+  results are best-effort; node↔screenshot matching is a configurable naming heuristic, not a
+  guaranteed pairing.
 
 ## Contributing
 

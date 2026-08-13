@@ -14,10 +14,10 @@ import org.gradle.api.Project
  * `nav-graph-psi-analyzer`'s PSI-based node and edge scanning, registering a
  * `generateDebugNavGraph` task.
  *
- * A deliberately separate plugin id from Phase 1's `io.github.hayatoyagi.compose-preview-toolkit`
- * (see the Phase 2 design doc): `nav-graph-psi-analyzer` carries `kotlin-compiler-embeddable`, a
- * heavy dependency that shouldn't land on every Phase-1-only consumer's classpath. This plugin
- * doesn't require Phase 1's plugin to also be applied — a module can use either, both, or neither.
+ * A deliberately separate plugin id from `io.github.hayatoyagi.compose-preview-toolkit`:
+ * `nav-graph-psi-analyzer` carries `kotlin-compiler-embeddable`, a heavy dependency that shouldn't
+ * land on the classpath of a consumer who only wants screenshot-test generation. This plugin
+ * doesn't require that other plugin to also be applied — a module can use either, both, or neither.
  *
  * Unlike `ComposePreviewToolkitPlugin`, this plugin needs no KSP-apply-timing `afterEvaluate`
  * gymnastics: there's no KSP involved at all here, just plain source files read directly by the
@@ -173,7 +173,8 @@ class ComposePreviewToolkitNavGraphPlugin : Plugin<Project> {
         // variant's KSP tasks, which (mirroring ComposePreviewToolkitPlugin's own
         // `target.tasks.findByName("kspDebugKotlin")` call inside *its* afterEvaluate) is only
         // guaranteed by graphModuleProject's own afterEvaluate — nested here inside withPlugin so
-        // it only runs for graph modules that actually apply Phase 1's plugin at all.
+        // it only runs for graph modules that actually apply the screenshot-testing plugin
+        // (SCREENSHOT_PLUGIN_ID) at all.
         graphModuleProject.pluginManager.withPlugin(SCREENSHOT_PLUGIN_ID) {
             graphModuleProject.afterEvaluate {
                 graphModuleProject.tasks.findByName("kspDebugKotlin")?.let { kspDebugKotlin ->
