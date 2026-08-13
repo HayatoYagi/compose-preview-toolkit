@@ -218,37 +218,35 @@ in sync). See `sample/app`/`sample/feature-a`/`sample/feature-b` for a worked ex
 
 ### Composite GitHub Action
 
-Three mutually exclusive publishing mechanisms, selected by the `mode` input:
+Two modes, selected by the `mode` input:
 
 ```yaml
 - uses: HayatoYagi/compose-preview-toolkit/.github/actions/deploy-nav-graph-site@v0.1.0
   with:
     site-task: ':app:generateDebugNavGraphSite'
     site-directory: 'app/build/composePreviewToolkit/navGraphSite/debug'
-    mode: 'build' # 'build' (default) | 'pages' | 'pr-preview'
+    mode: 'github-pages' # 'build' (default) | 'github-pages'
 ```
 
 - **`mode: 'build'`** (the default): only runs the Gradle task — no Pages permissions needed,
   useful for build-only CI dogfooding.
-- **`mode: 'pages'`**: deploys `site-directory` to a single, shared GitHub Pages site via the
-  official Actions Deployments API. Requires repo **Settings → Pages → Source** = **GitHub
-  Actions**.
-- **`mode: 'pr-preview'`**: publishes a live per-PR preview via
-  [`rossjrw/pr-preview-action`](https://github.com/rossjrw/pr-preview-action), with a sticky PR
-  comment linking to it, torn down automatically when the PR closes. Requires repo
-  **Settings → Pages → Source** = **Deploy from branch**.
+- **`mode: 'github-pages'`**: the full managed GitHub-Pages-with-previews experience from one
+  call, branching internally on the triggering event so the caller doesn't hand-assemble multiple
+  steps: on `push` it deploys `site-directory` as the persisted main site (branch-based deploy to
+  `pr-preview-branch`'s root); on `pull_request` (`opened`/`reopened`/`synchronize`) it deploys a
+  live per-PR preview via [`rossjrw/pr-preview-action`](https://github.com/rossjrw/pr-preview-action)
+  with a sticky PR comment; on `pull_request: closed` it tears that preview down. Both directions
+  share the same branch, so it just requires repo **Settings → Pages → Source** = **Deploy from
+  branch** pointed at `pr-preview-branch`.
 
-`pages` and `pr-preview` require mutually exclusive repo Pages Source settings, so combining a
-persisted main site with per-PR previews needs a branch-based deploy for the main site instead of
-`mode: 'pages'`. This repo's own `ci.yml` (plus
+This repo's own `ci.yml` (plus
 [`nav-graph-pr-preview-teardown.yml`](.github/workflows/nav-graph-pr-preview-teardown.yml)) is a
-concrete worked example of exactly that: both a persisted main site and live PR previews for
-`sample/app`'s nav graph, sharing one `gh-pages` branch.
+concrete worked example: a single `mode: 'github-pages'` call handles both a persisted main site
+and live PR previews for `sample/app`'s nav graph, sharing one `gh-pages` branch.
 
 See [.github/actions/deploy-nav-graph-site/README.md](.github/actions/deploy-nav-graph-site/README.md)
-for the full mode-by-mode breakdown, required permissions/settings per mode, and the
-persisted-main-site-plus-previews caveat, or [action.yml](.github/actions/deploy-nav-graph-site/action.yml)
-for every input.
+for the full mode-by-mode breakdown and required permissions/settings, or
+[action.yml](.github/actions/deploy-nav-graph-site/action.yml) for every input.
 
 ## Sample App
 

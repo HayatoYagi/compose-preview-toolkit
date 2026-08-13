@@ -28,4 +28,4 @@ jobs:
           working-directory: sample
           site-task: ':app:generateDebugNavGraphSite'
           site-directory: sample/app/build/composePreviewToolkit/navGraphSite/debug
-          mode: 'pr-preview'
+          mode: 'github-pages'
