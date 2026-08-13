@@ -15,8 +15,6 @@ dependencies {
 }
 
 mavenPublishing {
-    // SonatypeHost was removed from the DSL in mavenPublish 0.34.0 (OSSRH shutdown) — Central
-    // Portal is now the only target, so a no-arg call is the replacement.
     publishToMavenCentral()
     // Only when a signing key is actually configured (CI sets ORG_GRADLE_PROJECT_signingInMemoryKey,
     // exposed here as the "signingInMemoryKey" project property) — otherwise `publishToMavenLocal`
