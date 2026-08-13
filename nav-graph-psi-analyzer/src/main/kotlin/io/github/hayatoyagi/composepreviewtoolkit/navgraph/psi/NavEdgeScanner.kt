@@ -19,8 +19,7 @@ import org.jetbrains.kotlin.psi.ValueArgument
 val DEFAULT_NAVIGATE_CALL_NAMES = setOf("navigateTo", "navigate")
 
 /**
- * Default bound for [NavEdgeScanner]'s breadth-first call-graph traversal (Step C of the Phase 2
- * design doc). Chosen empirically, not just carried over from the design doc's sketch value:
+ * Default bound for [NavEdgeScanner]'s breadth-first call-graph traversal. Chosen empirically:
  * against the real `sample/feature-a`/`sample/feature-b` wiring shape (a callback threaded one
  * level from a feature module's `xNavEntries(...)` up to the app's `NavHost`, matching real
  * medimo-android code), the *shortest* discoverable path from an `entry<X> {}` block to its
@@ -42,9 +41,8 @@ const val DEFAULT_CALL_GRAPH_RESOLUTION_DEPTH = 4
  * navigation edges; [warnings] is every case the scan gave up on rather than risk guessing wrong —
  * ambiguous callee names, call-graph traversal exceeding [NavEdgeScanner]'s configured depth
  * bound, and bound-argument expressions the traversal couldn't make sense of. Exposed as data
- * (not just logged) specifically so tests can assert on *why* an edge was or wasn't found, per the
- * Phase 2 design doc's resilience philosophy: none of these cases should ever throw and fail the
- * whole scan.
+ * (not just logged) specifically so tests can assert on *why* an edge was or wasn't found: none of
+ * these cases should ever throw and fail the whole scan.
  */
 data class NavEdgeScanResult(
     val edges: List<NavEdge>,
@@ -53,8 +51,8 @@ data class NavEdgeScanResult(
 
 /**
  * Scans a set of already-parsed [KtFile]s for Navigation3 navigation edges between routes found by
- * (the same detection as) [NavNodeScanner], implementing Step B (call-graph construction) and
- * Step C (bounded-depth reachability search) of the Phase 2 design doc.
+ * (the same detection as) [NavNodeScanner], via call-graph construction followed by a
+ * bounded-depth reachability search.
  *
  * ## Algorithm
  *
@@ -76,16 +74,16 @@ data class NavEdgeScanResult(
  * 2. **Parameter reference**: the reference's simple name matches a function-typed parameter that
  *    is live in the current context — *regardless* of whether the reference is itself a call's
  *    callee (`onClick()`) or merely passed along as a value to some other call
- *    (`Button(onClick = onProceedClick)`, matching the design doc's explicit inclusion of "value
- *    passing" as an invocation site, since from a reachability standpoint both mean "whatever gets
- *    bound to this parameter runs from here"). This triggers the reverse/virtual edge: every call
- *    site of the *enclosing* declaration is found project-wide, the expression actually bound to
- *    that parameter at each call site is resolved (by argument name if named, else positionally),
- *    and search continues from there at depth + 1. The bound expression may itself be another bare
- *    parameter reference (a pass-through, e.g. a wiring function that just forwards its own
- *    parameter under the same name one level up) — that case recurses through this same handling
- *    again, costing one further hop each time, which is exactly how this module resolves
- *    `sample/feature-a`'s callback-threaded pattern without any special-casing (see class kdoc).
+ *    (`Button(onClick = onProceedClick)`), since from a reachability standpoint both mean
+ *    "whatever gets bound to this parameter runs from here". This triggers the reverse/virtual
+ *    edge: every call site of the *enclosing* declaration is found project-wide, the expression
+ *    actually bound to that parameter at each call site is resolved (by argument name if named,
+ *    else positionally), and search continues from there at depth + 1. The bound expression may
+ *    itself be another bare parameter reference (a pass-through, e.g. a wiring function that just
+ *    forwards its own parameter under the same name one level up) — that case recurses through
+ *    this same handling again, costing one further hop each time, which is exactly how this
+ *    module resolves `sample/feature-a`'s callback-threaded pattern without any special-casing
+ *    (see class kdoc).
  * 3. **Known function call**: the reference is a call's callee and its simple name resolves
  *    unambiguously to another parsed [KtNamedFunction] → continue the search from that function's
  *    body at depth + 1, with that function's *own* function-typed parameters as the new live set

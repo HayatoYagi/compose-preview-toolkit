@@ -15,11 +15,11 @@ import io.github.hayatoyagi.composepreviewtoolkit.sample.featureb.featureBNavEnt
 object HomeRoute : NavKey
 
 /**
- * App-level Nav3 host. Mirrors medimo-android's real wiring shape (see the Phase 2 design doc's
- * Context section): the `navigateTo(FeatureBRoute)` call for feature-a's "proceed" action is
- * written *here*, at the app level, passed into [featureANavEntries] as the `onProceedClick`
- * callback argument — not inside feature-a's own `entry<FeatureARoute> {}` block. This is pattern
- * (i) of the two navigation-wiring shapes the nav-graph edge detector supports.
+ * App-level Nav3 host. Mirrors medimo-android's real wiring shape: the `navigateTo(FeatureBRoute)`
+ * call for feature-a's "proceed" action is written *here*, at the app level, passed into
+ * [featureANavEntries] as the `onProceedClick` callback argument — not inside feature-a's own
+ * `entry<FeatureARoute> {}` block. This is pattern (i) of the two navigation-wiring shapes the
+ * nav-graph edge detector supports.
  *
  * [featureBNavEntries] is passed [navigateTo] itself (not a single-purpose callback like
  * `onProceedClick`) — its own `entry<FeatureBRoute> {}` block calls `navigateTo(FeatureARoute)`

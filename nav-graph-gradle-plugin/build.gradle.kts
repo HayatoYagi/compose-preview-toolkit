@@ -25,8 +25,8 @@ gradlePlugin {
 }
 
 dependencies {
-    // A plain project dependency, not a version-embedded runtime-fetched artifact like Phase 1's
-    // ksp-processor: nav-graph-psi-analyzer's KtFile/NavNodeScanner classes are used directly
+    // A plain project dependency, not a version-embedded runtime-fetched artifact like the
+    // ksp-processor module: nav-graph-psi-analyzer's KtFile/NavNodeScanner classes are used directly
     // inside this plugin's own task action code (GenerateDebugNavGraph), not applied to a
     // *consumer's* buildscript classpath by coordinate string at apply-time the way the KSP
     // processor is. So there's no need for this module's own generatePluginVersion-style

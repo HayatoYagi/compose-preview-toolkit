@@ -21,22 +21,25 @@ cd sample
 Re-run the `publishToMavenLocal` step after any change to `annotations`, `ksp-processor`,
 `gradle-plugin`, `nav-graph-psi-analyzer`, or `nav-graph-gradle-plugin` to pick it up in `sample`.
 
-`sample/` is itself a multi-module build: `sample/app` (the Nav3 host, applies both the Phase 1
-screenshot-test plugin and the navgraph plugin), `sample/feature-a`, and `sample/feature-b` (each
-apply only the navgraph plugin — see `sample/app/src/main/kotlin/.../AppNavHost.kt` for how they're
-wired together). `generateDebugNavGraph` writes each module's own `ComposePreviewToolkitNavNodeIndex.txt`
-under that module's `build/generated/composePreviewToolkit/navGraph/debug/` — module-local by
-design; cross-module aggregation into a single graph is a later milestone (see `docs/ROADMAP.md`).
+`sample/` is itself a multi-module build: `sample/app` (the Nav3 host, applies both the
+`io.github.hayatoyagi.compose-preview-toolkit` screenshot-test plugin and the navgraph plugin),
+`sample/feature-a`, and `sample/feature-b` (each apply only the navgraph plugin — see
+`sample/app/src/main/kotlin/.../AppNavHost.kt` for how they're wired together).
+`generateDebugNavGraph` writes each module's own `ComposePreviewToolkitNavNodeIndex.txt` under that
+module's `build/generated/composePreviewToolkit/navGraph/debug/` — module-local by design.
+Cross-module aggregation into a single graph is handled separately by `generateDebugNavGraphSite`
+(see README.md's "Gallery site" subsection under "Nav Graph").
 
 ## Opening a PR
 
 `ci.yml` runs on every PR: it builds `annotations`/`ksp-processor`/`gradle-plugin`/
-`nav-graph-psi-analyzer`/`nav-graph-gradle-plugin`, publishes them to `mavenLocal`, then runs this
-repo's own `update-validate-screenshot-tests` composite action against `sample/` — so a broken
-plugin/processor change or a broken `action.yml` both surface directly in the PR's checks. That
-action only exercises Phase 1 (`updateDebugScreenshotTest`/`validateDebugScreenshotTest`, which
-Gradle resolves to just `:app` since only `sample/app` applies the Phase 1 plugin); it doesn't run
-`generateDebugNavGraph` — dogfooding that in CI is a later PR's job (see `docs/ROADMAP.md`).
+`nav-graph-psi-analyzer`/`nav-graph-gradle-plugin`, publishes them to `mavenLocal`, then dogfoods
+both composite actions against `sample/` — so a broken plugin/processor change or a broken
+`action.yml` both surface directly in the PR's checks. First, `update-validate-screenshot-tests`
+runs `updateDebugScreenshotTest`/`validateDebugScreenshotTest` (which Gradle resolves to just
+`:app` since only `sample/app` applies the screenshot-testing plugin). Then `deploy-nav-graph-site`
+runs `:app:generateDebugNavGraphSite` in `mode: 'build'` (build-only, no Pages permissions needed)
+to exercise the nav-graph site generation across all three sample modules.
 
 ## Releasing a new version
 
