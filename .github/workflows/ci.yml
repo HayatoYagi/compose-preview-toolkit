@@ -55,17 +55,53 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           working-directory: sample
 
-      # Build-only dogfooding: exercises generateDebugNavGraphSite on every PR without publishing
-      # anywhere, so a broken action.yml or a broken plugin/analyzer change surfaces here. Both
-      # publishing modes (mode: pages, mode: pr-preview) need permissions/settings this job
-      # doesn't have (pages/id-token + github-pages environment; or a branch-based Pages source),
-      # so they're left to a separate, publish-dedicated workflow. mode: 'build' is this action's
-      # default, but named explicitly here since this call site is exactly the case the mode
-      # surface exists to describe.
+      # Build-only dogfooding on push to main: exercises generateDebugNavGraphSite so a broken
+      # action.yml or a broken plugin/analyzer change surfaces here, and its output feeds the
+      # gh-pages deploy step below (no rebuild needed there). Skipped on pull_request — the
+      # "Deploy PR preview" step below already runs this same Gradle task itself (every
+      # deploy-nav-graph-site mode does, regardless of mode), so building it again first would
+      # just waste CI time.
       - name: Build sample nav graph site
+        if: github.event_name == 'push'
         uses: ./.github/actions/deploy-nav-graph-site
         with:
           working-directory: sample
           site-task: ':app:generateDebugNavGraphSite'
           site-directory: sample/app/build/composePreviewToolkit/navGraphSite/debug
           mode: 'build'
+
+      # Builds and publishes a live preview — including this run's freshly-committed screenshot
+      # baselines from the step above — to pr-preview/pr-<number>/ on the gh-pages branch, with a
+      # sticky PR comment linking to it. Deliberately kept in this same job/checkout (not a
+      # separate workflow triggered off the same pull_request event) so it can't race the
+      # baseline-update step above: a standalone workflow could check out and build before that
+      # step's auto-commit push landed, deploying a preview with stale thumbnails. Also serves as
+      # this repo's build-only dogfooding for PR events, since a broken action.yml or
+      # plugin/analyzer change fails this step just the same. Teardown on PR close is handled by
+      # the separate nav-graph-pr-preview-teardown.yml, which doesn't need any of this job's
+      # Gradle/mavenLocal setup.
+      - name: Deploy PR preview of sample nav graph site
+        if: github.event_name == 'pull_request'
+        uses: ./.github/actions/deploy-nav-graph-site
+        with:
+          working-directory: sample
+          site-task: ':app:generateDebugNavGraphSite'
+          site-directory: sample/app/build/composePreviewToolkit/navGraphSite/debug
+          mode: 'pr-preview'
+
+      # Persists the main site whenever main changes, deploying the same directory the mode:
+      # 'build' step above just generated (no rebuild needed). Branch-based rather than this
+      # action's own mode: 'pages', so it can share the same gh-pages branch as the pr-preview
+      # deploy above without the repo Pages Source setting conflict described in README.md's "Nav
+      # Graph" caveat (mode: 'pages' requires Source = GitHub Actions; pr-preview requires Source =
+      # Deploy from branch — mutually exclusive and repo-wide). clean-exclude/force: false ensure
+      # this never wipes or force-pushes over whatever PR previews are currently live under
+      # pr-preview/.
+      - name: Deploy main site to gh-pages
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: JamesIves/github-pages-deploy-action@v4
+        with:
+          folder: sample/app/build/composePreviewToolkit/navGraphSite/debug
+          branch: gh-pages
+          clean-exclude: pr-preview
+          force: false

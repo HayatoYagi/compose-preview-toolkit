@@ -228,40 +228,27 @@ Three mutually exclusive publishing mechanisms, selected by the `mode` input:
     mode: 'build' # 'build' (default) | 'pages' | 'pr-preview'
 ```
 
-- **`mode: 'build'`** (the default): only runs the Gradle task. No Pages permissions needed at
-  all — this is what this repo's own `ci.yml` uses to dogfood `generateDebugNavGraphSite` against
-  `sample/app` on every PR.
-- **`mode: 'pages'`**: additionally wraps `actions/configure-pages` / `actions/upload-pages-artifact`
-  / `actions/deploy-pages` around the build step to deploy `site-directory` to a single, shared
-  GitHub Pages site (one live deployment for the whole repo — every run replaces it). The calling
-  job needs `permissions: { pages: write, id-token: write }` and `environment: github-pages`
-  itself — a composite action can't set job-level permissions or environment on its caller.
-  Requires the repo's **Settings → Pages → Source** set to **GitHub Actions**.
-- **`mode: 'pr-preview'`**: publishes the built site to a per-pull-request preview instead of one
-  shared site, via [`rossjrw/pr-preview-action`](https://github.com/rossjrw/pr-preview-action).
-  Each PR gets its own live URL at `pr-preview/pr-<number>/` (configurable via
-  `pr-preview-umbrella-dir`) on a branch (`pr-preview-branch`, default `gh-pages`), pushed with
-  retry-safe git so concurrent PRs' CI runs don't clobber each other's subdirectories, with a
-  sticky PR comment linking to it. The calling workflow must trigger on `pull_request` events
-  **including `closed`** (e.g. `types: [opened, reopened, synchronize, closed]`) so the preview is
-  torn down when the PR closes — `pr-preview-action` detects the `closed` event itself and
-  switches to cleanup mode; this action skips the build step on that event since there's nothing
-  to publish. The calling job needs `permissions: { contents: write, pull-requests: write }` (or
-  pass a token with equivalent access as `github-token`). Requires the repo's
-  **Settings → Pages → Source** set to **Deploy from branch** pointed at `pr-preview-branch`.
+- **`mode: 'build'`** (the default): only runs the Gradle task — no Pages permissions needed,
+  useful for build-only CI dogfooding.
+- **`mode: 'pages'`**: deploys `site-directory` to a single, shared GitHub Pages site via the
+  official Actions Deployments API. Requires repo **Settings → Pages → Source** = **GitHub
+  Actions**.
+- **`mode: 'pr-preview'`**: publishes a live per-PR preview via
+  [`rossjrw/pr-preview-action`](https://github.com/rossjrw/pr-preview-action), with a sticky PR
+  comment linking to it, torn down automatically when the PR closes. Requires repo
+  **Settings → Pages → Source** = **Deploy from branch**.
 
-  **Caveat if you also want a persisted "main" site**: GitHub Pages' source setting
-  (**Deploy from branch** vs **GitHub Actions**) is repo-wide, not per-workflow, so `mode: 'pages'`
-  (which requires the **GitHub Actions** source) and `mode: 'pr-preview'` (which requires
-  **Deploy from branch**) cannot both publish to the *same* repo's Pages site — you have to pick
-  one as your main-site mechanism. If you want per-PR previews *and* a persisted main deployment,
-  deploy the main site with a branch-based action too (e.g.
-  [`JamesIves/github-pages-deploy-action`](https://github.com/JamesIves/github-pages-deploy-action)
-  pushing to the same `pr-preview-branch`), and pass it `clean-exclude: pr-preview` (matching
-  `pr-preview-umbrella-dir`) so the main deploy doesn't wipe currently-live PR previews, and
-  `force: false` so it doesn't force-push over them either.
+`pages` and `pr-preview` require mutually exclusive repo Pages Source settings, so combining a
+persisted main site with per-PR previews needs a branch-based deploy for the main site instead of
+`mode: 'pages'`. This repo's own `ci.yml` (plus
+[`nav-graph-pr-preview-teardown.yml`](.github/workflows/nav-graph-pr-preview-teardown.yml)) is a
+concrete worked example of exactly that: both a persisted main site and live PR previews for
+`sample/app`'s nav graph, sharing one `gh-pages` branch.
 
-See [action.yml](.github/actions/deploy-nav-graph-site/action.yml) for every input.
+See [.github/actions/deploy-nav-graph-site/README.md](.github/actions/deploy-nav-graph-site/README.md)
+for the full mode-by-mode breakdown, required permissions/settings per mode, and the
+persisted-main-site-plus-previews caveat, or [action.yml](.github/actions/deploy-nav-graph-site/action.yml)
+for every input.
 
 ## Sample App
 
