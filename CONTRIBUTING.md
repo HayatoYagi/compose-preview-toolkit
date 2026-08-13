@@ -38,8 +38,9 @@ both composite actions against `sample/` — so a broken plugin/processor change
 `action.yml` both surface directly in the PR's checks. First, `update-validate-screenshot-tests`
 runs `updateDebugScreenshotTest`/`validateDebugScreenshotTest` (which Gradle resolves to just
 `:app` since only `sample/app` applies the screenshot-testing plugin). Then `deploy-nav-graph-site`
-runs `:app:generateDebugNavGraphSite` in `mode: 'build'` (build-only, no Pages permissions needed)
-to exercise the nav-graph site generation across all three sample modules.
+runs `:app:generateDebugNavGraphSite` in `mode: 'github-pages'`, which builds across all three
+sample modules and, on a pull_request run, also deploys a live per-PR preview of the result to
+`gh-pages`.
 
 ## Releasing a new version
 

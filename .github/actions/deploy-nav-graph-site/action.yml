@@ -1,12 +1,16 @@
 name: 'Build & Deploy Nav Graph Site'
 description: >-
-  Runs a compose-preview-toolkit nav-graph site generation task (generateDebugNavGraphSite),
-  and optionally publishes the result via one of two mutually exclusive mechanisms selected by
-  the mode input: a single shared GitHub Pages site ("pages"), or a per-pull-request preview
-  posted as a sticky PR comment ("pr-preview"). Building always happens except when tearing down
-  a closed PR's preview; publishing is opt-in via mode, so the same action can be used for
-  build-only CI dogfooding (every PR, the default), a real Pages deploy (e.g. a workflow
-  triggered only on pushes to main), or per-PR previews.
+  Runs a compose-preview-toolkit nav-graph site generation task (generateDebugNavGraphSite), and
+  optionally publishes the result via the mode input. "build" (default) only runs the Gradle
+  task — no Pages permissions needed at all, useful for build-only CI dogfooding on every PR.
+  "github-pages" runs the full GitHub-Pages-with-previews experience end to end from this single
+  call, branching internally on the triggering event so the caller doesn't have to hand-assemble
+  multiple steps or workflows: on `push` it deploys the built site as the persisted main site
+  (branch-based deploy to pr-preview-branch's root); on `pull_request`
+  (opened/reopened/synchronize) it deploys a live per-PR preview via rossjrw/pr-preview-action and
+  posts a sticky PR comment; on `pull_request: closed` it tears that preview down (skipping its
+  own build step, since there's nothing to publish). Any other event type under "github-pages"
+  mode fails fast, since it almost always means the calling workflow's trigger is misconfigured.
 author: 'HayatoYagi'
 
 inputs:
@@ -25,8 +29,8 @@ inputs:
   site-directory:
     description: >-
       Path to the generated site directory (containing index.html), relative to the repository
-      root — not working-directory — since actions/upload-pages-artifact and pr-preview-action
-      both resolve their own path inputs relative to the workspace root. E.g.
+      root — not working-directory — since the branch-deploy step and pr-preview-action both
+      resolve their own path inputs relative to the workspace root. E.g.
       "sample/app/build/composePreviewToolkit/navGraphSite/debug".
     required: true
   gradle-args:
@@ -36,58 +40,69 @@ inputs:
   mode:
     description: >-
       What to do with the built site: "build" (default) only runs the Gradle task — useful for
-      dogfooding it on every PR without needing any Pages permissions at all. "pages" additionally
-      deploys site-directory to GitHub Pages via the official Pages Deployments API
-      (configure-pages/upload-pages-artifact/deploy-pages); the calling job must additionally set
-      `permissions: { pages: write, id-token: write }` and `environment: github-pages` itself — a
-      composite action cannot set job-level permissions or environment on its caller. This API
-      only supports one live deployment per repo, so it replaces the whole site on every run.
-      "pr-preview" instead publishes the built site to a per-PR subdirectory
-      (pr-preview/pr-<number>/ by default) on a branch, via rossjrw/pr-preview-action, and posts a
-      sticky PR comment with the live URL; it tears the subdirectory down automatically when the
-      calling workflow runs on the PR's "closed" event. "pages" and "pr-preview" are mutually
-      exclusive publishing mechanisms for the *same* repo's Pages site — see README.md's "Nav
-      Graph" section for why (GitHub Pages' "Deploy from branch" vs "GitHub Actions" source
-      setting is repo-wide, not per-workflow) and how to combine per-PR previews with a persisted
-      main deployment if you want both.
+      dogfooding it on every PR without needing any Pages permissions at all. "github-pages" is
+      the full managed experience: on `push` it deploys site-directory as the persisted main site
+      (branch-based deploy to pr-preview-branch's root, excluding pr-preview-umbrella-dir from
+      cleanup so it never wipes live previews); on `pull_request`
+      (opened/reopened/synchronize) it deploys a live per-PR preview via rossjrw/pr-preview-action
+      to pr-preview-branch, under pr-preview-umbrella-dir/pr-<number>/, with a sticky PR comment
+      linking to it; on `pull_request: closed` it tears that preview down. Both directions use the
+      same branch-based mechanism, so the repo's GitHub Pages source setting is just "Deploy from
+      branch" pointed at pr-preview-branch — see README.md's "Nav Graph" section.
     required: false
     default: 'build'
   github-token:
     description: >-
-      Token used by mode "pr-preview" to push the preview commit and post/update the sticky PR
-      comment. Only used when mode is "pr-preview"; ignored otherwise. The default GITHUB_TOKEN
-      works as long as the calling job has `permissions: { contents: write, pull-requests: write }`.
+      Token used by mode "github-pages" to push the main-site/preview deploy commits and
+      post/update the sticky PR comment. Only used when mode is "github-pages"; ignored
+      otherwise. The default GITHUB_TOKEN works as long as the calling job has `permissions: {
+      contents: write, pull-requests: write }`.
     required: false
     default: ${{ github.token }}
   pr-preview-branch:
     description: >-
-      Branch that mode "pr-preview" deploys previews to. Only used when mode is "pr-preview". The
-      repo's GitHub Pages source setting must be "Deploy from branch" pointed at this branch — see
-      README.md's "Nav Graph" section.
+      Branch that mode "github-pages" deploys both the persisted main site and PR previews to.
+      Only used when mode is "github-pages". The repo's GitHub Pages source setting must be
+      "Deploy from branch" pointed at this branch — see README.md's "Nav Graph" section.
     required: false
     default: 'gh-pages'
   pr-preview-umbrella-dir:
     description: >-
       Directory on pr-preview-branch containing every PR's preview subdirectory. Only used when
-      mode is "pr-preview".
+      mode is "github-pages" — also passed as the persisted main-site deploy's clean-exclude
+      pattern so that deploy never wipes whatever PR previews are currently live under it.
     required: false
     default: 'pr-preview'
 
 outputs:
   page-url:
-    description: 'URL of the deployed Pages site. Only set when mode is "pages".'
-    value: ${{ steps.deployment.outputs.page_url }}
+    description: >-
+      Best-effort URL of the persisted main site, set only when mode is "github-pages" and this
+      run was triggered by a `push`. Computed from repository context
+      (https://<owner>.github.io/<repo>/), since the branch-deploy action itself has no URL
+      output — double check it against your repo's actual Pages URL if you use a custom domain or
+      this is a user/org root-page repo (`<owner>.github.io`). Empty on `pull_request` runs.
+    value: ${{ steps.compute-page-url.outputs.page-url }}
   preview-url:
     description: >-
-      URL of the PR preview. Only set when mode is "pr-preview" and this run deployed a preview
-      (not when it tore one down on PR close).
+      URL of the PR preview, straight from rossjrw/pr-preview-action's own output. Only set when
+      mode is "github-pages", this run was triggered by `pull_request`, and it deployed a preview
+      (opened/reopened/synchronize) rather than tearing one down (closed).
     value: ${{ steps.pr-preview.outputs.preview-url }}
 
 runs:
   using: 'composite'
   steps:
-    # Nothing to build when tearing down a closed PR's preview — pr-preview-action's own "auto"
-    # action already detects the closed event and switches to removal, which doesn't need a
+    - name: Validate event for github-pages mode
+      if: >-
+        inputs.mode == 'github-pages' && github.event_name != 'push' && github.event_name != 'pull_request'
+      shell: bash
+      run: |
+        echo "::error::mode 'github-pages' only knows how to handle 'push' and 'pull_request' events (this run's event was '${{ github.event_name }}'). Check the calling workflow's 'on:' triggers."
+        exit 1
+
+    # Nothing to build when tearing down a closed PR's preview — rossjrw/pr-preview-action's own
+    # "auto" action already detects the closed event and switches to removal, which doesn't need a
     # freshly-built site at all.
     - name: Generate nav graph site
       if: github.event.action != 'closed'
@@ -95,23 +110,28 @@ runs:
       working-directory: ${{ inputs.working-directory }}
       run: ./gradlew ${{ inputs.site-task }} ${{ inputs.gradle-args }}
 
-    - name: Configure Pages
-      if: inputs.mode == 'pages'
-      uses: actions/configure-pages@v5
-
-    - name: Upload site artifact
-      if: inputs.mode == 'pages'
-      uses: actions/upload-pages-artifact@v3
+    - name: Deploy main site to GitHub Pages
+      if: inputs.mode == 'github-pages' && github.event_name == 'push'
+      uses: JamesIves/github-pages-deploy-action@v4
       with:
-        path: ${{ inputs.site-directory }}
+        token: ${{ inputs.github-token }}
+        folder: ${{ inputs.site-directory }}
+        branch: ${{ inputs.pr-preview-branch }}
+        clean-exclude: ${{ inputs.pr-preview-umbrella-dir }}
+        # clean-exclude only protects excluded paths from the clean step's *deletion* pass — it
+        # does nothing against force's history-rewriting push, which would still discard whatever
+        # commits pr-preview-action made to this same branch. force is on by default, so this must
+        # be explicit.
+        force: false
 
-    - name: Deploy to GitHub Pages
-      if: inputs.mode == 'pages'
-      id: deployment
-      uses: actions/deploy-pages@v4
+    - name: Compute main site URL
+      if: inputs.mode == 'github-pages' && github.event_name == 'push'
+      id: compute-page-url
+      shell: bash
+      run: echo "page-url=https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/" >> "$GITHUB_OUTPUT"
 
     - name: Deploy PR preview
-      if: inputs.mode == 'pr-preview'
+      if: inputs.mode == 'github-pages' && github.event_name == 'pull_request'
       id: pr-preview
       uses: rossjrw/pr-preview-action@v1
       with:
