@@ -19,16 +19,15 @@ import java.util.concurrent.Callable
  * doesn't require that other plugin to also be applied — a module can use either, both, or neither.
  *
  * [Project.discoverGraphModules] reads a dependency project's sources directly, so this plugin
- * doesn't need to be applied there for its declarations to be found — a
- * dependency module with no Compose Kotlin Gradle subplugin of its own (e.g. one that just
- * declares route types, with no Composable UI) is discovered and scanned correctly either way. The
- * one case where this plugin *should* also be applied on the dependency project: if that project
- * applies its own Compose Kotlin Gradle subplugin (`org.jetbrains.kotlin.plugin.compose`) but
- * doesn't apply this one, `kotlin-compiler-embeddable` ends up present on only some Compose
- * modules' plugin classpaths, and Gradle can resolve the Kotlin Gradle plugin via mismatched
- * classloaders across modules (a real, reproduced failure mode — Gradle logs "The Kotlin Gradle
- * plugin was loaded multiple times in different subprojects, which is not supported and may break
- * the build").
+ * doesn't need to be applied there for its declarations to be found — a dependency module with no
+ * Compose Kotlin Gradle subplugin of its own (e.g. one that just declares route types, with no
+ * Composable UI) is discovered and scanned correctly either way. The one case where this plugin
+ * *should* also be applied on the dependency project: if that project applies its own Compose
+ * Kotlin Gradle subplugin (`org.jetbrains.kotlin.plugin.compose`) but doesn't apply this one,
+ * `kotlin-compiler-embeddable` ends up present on only some Compose modules' plugin classpaths,
+ * and Gradle can resolve the Kotlin Gradle plugin via mismatched classloaders across modules (a
+ * real, reproduced failure mode — Gradle logs "The Kotlin Gradle plugin was loaded multiple times
+ * in different subprojects, which is not supported and may break the build").
  *
  * Unlike `ComposePreviewToolkitPlugin`, this plugin needs no KSP-apply-timing `afterEvaluate`
  * gymnastics: there's no KSP involved at all here, just plain source files read directly by the
@@ -66,15 +65,14 @@ class ComposePreviewToolkitNavGraphPlugin : Plugin<Project> {
                 task.outputDirectory.set(target.layout.buildDirectory.dir("composePreviewToolkit/navGraphSite/debug"))
             }
 
-        // Memoized: every Callable below reads this same value, but debugCompileClasspath should
-        // only be resolved once. Deferred (not resolved right here) until Gradle actually needs a
-        // task's dependencies/inputs, at task-graph-computation time — by then every project in the
-        // build has already configured normally, so this needs none of ComposePreviewToolkitPlugin's
-        // own KSP-apply-timing afterEvaluate/withPlugin machinery to know a graph module's plugins
-        // are already applied.
+        // Memoized (`by lazy`): every Callable below reads this same value, but
+        // debugCompileClasspath should only be resolved once. See discoverGraphModules()'s kdoc for
+        // when this actually gets evaluated.
         val graphModules by lazy { target.discoverGraphModules() }
 
         generateDebugNavGraphSite.configure { task ->
+            // Raw source, not a generated artifact — needs no task dependency. See
+            // GenerateDebugNavGraphSite's kdoc for why this task needs each path's actual sources.
             task.edgeSourceFiles.from(
                 Callable {
                     graphModules.map { path ->
@@ -103,6 +101,8 @@ class ComposePreviewToolkitNavGraphPlugin : Plugin<Project> {
                     }
                 },
             )
+            // Only graph modules that apply the screenshot-testing plugin have a kspDebugKotlin
+            // task to depend on.
             task.dependsOn(
                 Callable {
                     graphModules.mapNotNull { path ->
