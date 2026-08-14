@@ -172,9 +172,9 @@ for every input.
 A **separate** plugin id, `io.github.hayatoyagi.compose-preview-toolkit.navgraph`, with the same
 [Gradle/Kotlin requirements](#requirements) as Screenshot Testing above but neither AGP's
 screenshot-testing alpha feature nor KSP. It statically scans every discovered module's
-`src/main/kotlin` via Kotlin PSI (no type resolution) for Navigation3 `entry<Route> { ... }`
-registrations (nodes) and `navigateTo`/`navigate`-shaped calls reachable from each one via a
-bounded-depth call-graph search (edges):
+`src/main/kotlin` for Navigation3 `entry<Route> { ... }` registrations (nodes) and
+`navigateTo`/`navigate`-shaped calls reachable from each one via a bounded-depth call-graph search
+(edges):
 
 ```kotlin
 // feature module's build.gradle.kts
@@ -208,7 +208,7 @@ routes into its own `NavDisplay`), just run `generateDebugNavGraphSite`:
 
 This task:
 
-- Runs one project-wide PSI scan across every discovered project's raw `.kt` sources to find both
+- Runs one project-wide scan across every discovered project's raw `.kt` sources to find both
   nodes and edges together, rather than aggregating each module's own precomputed index — a
   route's `entry { ... }` registration, its declaration, and the `navigateTo(...)` call that
   reaches it often all live in different modules, which a single-module scan can't resolve. A
