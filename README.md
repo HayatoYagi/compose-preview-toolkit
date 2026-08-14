@@ -213,7 +213,8 @@ link to that exact line on GitHub — otherwise it's shown as plain, non-interac
 
 ### Composite GitHub Action
 
-Two modes, selected by the `mode` input:
+`mode: 'build'` (the default) just runs the Gradle task; `mode: 'github-pages'` additionally
+manages a persisted main site plus live per-PR previews on GitHub Pages:
 
 ```yaml
 - uses: HayatoYagi/compose-preview-toolkit/.github/actions/deploy-nav-graph-site@v0.3.0
@@ -223,21 +224,8 @@ Two modes, selected by the `mode` input:
     mode: 'github-pages' # 'build' (default) | 'github-pages'
 ```
 
-- **`mode: 'build'`** (the default): only runs the Gradle task — no Pages permissions needed,
-  useful for build-only CI dogfooding.
-- **`mode: 'github-pages'`**: the full managed GitHub-Pages-with-previews experience from one
-  call, branching internally on the triggering event: `push` deploys `site-directory` as the
-  persisted main site; `pull_request` (`opened`/`reopened`/`synchronize`) deploys a live per-PR
-  preview with a sticky PR comment; `pull_request: closed` tears that preview down. Both share the
-  same branch — requires repo **Settings → Pages → Source** = **Deploy from branch** pointed at
-  `pages-branch`.
-
-This repo's own [`ci.yml`](.github/workflows/ci.yml) is a concrete worked example: a single
-`mode: 'github-pages'` call, in one workflow, handles a persisted main site, live PR previews, and
-teardown for `sample/app`'s nav graph.
-
 See [.github/actions/deploy-nav-graph-site/README.md](.github/actions/deploy-nav-graph-site/README.md)
-for the full mode-by-mode breakdown and required permissions/settings, or
+for the full mode-by-mode breakdown, required permissions/settings, and a worked example, or
 [action.yml](.github/actions/deploy-nav-graph-site/action.yml) for every input.
 
 ## Sample App
