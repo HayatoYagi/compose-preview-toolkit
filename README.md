@@ -143,7 +143,7 @@ See [.github/actions/update-validate-screenshot-tests/README.md](.github/actions
 for requirements and a full workflow example, or [action.yml](.github/actions/update-validate-screenshot-tests/action.yml)
 for every input.
 
-## Nav Graph (experimental)
+## Nav Graph
 
 A **separate** plugin id, `io.github.hayatoyagi.compose-preview-toolkit.navgraph` — not bundled
 into the plugin above, since it pulls in a heavy embedded-Kotlin-compiler dependency that only
