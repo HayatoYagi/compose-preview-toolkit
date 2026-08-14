@@ -45,11 +45,24 @@ class KotlinPsiParser : AutoCloseable {
         PsiFileFactory.getInstance(environment.project)
     }
 
-    /** Parses in-memory Kotlin source text (used directly by unit tests). */
+    /**
+     * Parses in-memory Kotlin source text (used directly by unit tests).
+     *
+     * Normalizes `\r\n`/`\r` to `\n` first: [PsiFileFactory.createFileFromText] asserts the text
+     * it's given has no non-`\n` line separators, which real `.kt` files checked out with
+     * `core.autocrlf=true` (the common Windows Git default) violate — this keeps [parse] working
+     * regardless of the caller's own checkout config, rather than requiring every consumer to
+     * normalize line endings themselves before calling in.
+     */
     fun parse(
         fileName: String,
         sourceText: String,
-    ): KtFile = psiFileFactory.createFileFromText(fileName, KotlinLanguage.INSTANCE, sourceText) as KtFile
+    ): KtFile =
+        psiFileFactory.createFileFromText(
+            fileName,
+            KotlinLanguage.INSTANCE,
+            sourceText.replace("\r\n", "\n").replace("\r", "\n"),
+        ) as KtFile
 
     /**
      * Parses a real `.kt` file on disk, using its *absolute* path (not just its bare file name)
