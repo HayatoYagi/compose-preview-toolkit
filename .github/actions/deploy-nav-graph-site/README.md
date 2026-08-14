@@ -17,18 +17,26 @@ task (`generateDebugNavGraphSite`) and optionally publishes the result via the `
     `closed`** (e.g. `types: [opened, reopened, synchronize, closed]`, to publish/tear down
     previews — see "Usage" below); and repo **Settings → Pages → Source** must be **Deploy from
     branch**, pointed at `pr-preview-branch` (default `gh-pages`).
-
-If your project also generates screenshot baselines (e.g. via this repo's own screenshot-testing
-plugin) and you want the gallery thumbnails to reflect the latest ones, run whatever step updates
-those baselines **before** this action in the same job — this action just reads whatever reference
-images exist on disk at the time it runs, it doesn't regenerate them itself. Calling it from a
-separate, independently-triggered workflow risks racing your baseline-update step and publishing a
-site with stale thumbnails.
+- **Fresh screenshot baselines before this action runs, in the same job.** Thumbnails paired with
+  the nav graph are the actual value of this gallery site — a graph with no thumbnails is the
+  unusual case, not the common one — so most consumers pairing this action with a screenshot-testing
+  setup (e.g. this repo's own screenshot-testing plugin) need a baseline-update step ahead of it.
+  This action never generates or refreshes baselines itself; it only reads whatever reference
+  images already exist on disk in `working-directory` at the time it runs. Run your
+  baseline-update step **before** this action, **in the same job** — see "Usage" below. Calling
+  this action from a separate, independently-triggered workflow risks that workflow checking out
+  and building before the baseline-update step's auto-commit push has landed, publishing a site
+  with stale thumbnails.
 
 ## Usage
 
-The whole point of `mode: 'github-pages'` is that a consumer's workflow needs no more boilerplate
-than this — one action call, correct behavior for push/open/sync/close all handled internally:
+The realistic default is a screenshot-testing setup feeding this action's gallery thumbnails, so
+the primary example below runs a baseline-update step first, in the same job, before calling this
+action — swap the "Update screenshot baselines" step for whatever your project uses to regenerate
+and commit its baselines (this repo's own
+[`update-validate-screenshot-tests`](../update-validate-screenshot-tests) composite action is one
+example); what matters is that it runs before this action, in the same job, so its baseline commit
+is on disk when this action reads reference images:
 
 ```yaml
 on:
@@ -46,12 +54,24 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      # Runs first, in this same job: refreshes screenshot baselines and commits any changes
+      # back to the branch, so the gallery thumbnails below reflect the latest UI. Swap this
+      # for whatever step regenerates your project's baselines.
+      - name: Update screenshot baselines
+        uses: your-org/your-repo/.github/actions/update-screenshot-baselines@main
+
       - uses: HayatoYagi/compose-preview-toolkit/.github/actions/deploy-nav-graph-site@v0.1.0
         with:
           site-task: ':app:generateDebugNavGraphSite'
           site-directory: 'app/build/composePreviewToolkit/navGraphSite/debug'
           mode: 'github-pages' # 'build' (default) | 'github-pages'
 ```
+
+If your project has no screenshot baselines at all (or doesn't care about gallery thumbnails), the
+baseline-update step is unnecessary — the rest of the setup is unchanged, and `mode: 'github-pages'`
+still needs no more boilerplate than one action call, with correct behavior for
+push/open/sync/close all handled internally.
 
 If the site-generating module lives in a separate Gradle build (own `gradlew`), set
 `working-directory` — e.g. this repo's own `sample/` (see `sample/settings.gradle.kts` for why
@@ -84,13 +104,28 @@ it's separate).
 ## How this repo uses it
 
 This repo dogfoods the full main-site-plus-previews experience for `sample/app`'s generated nav
-graph, positioned in `ci.yml`'s single job right after its screenshot-baseline update step (see
-the Requirements note on why):
+graph. Unlike the single-job "Usage" example above, `ci.yml` splits this across two jobs, `build`
+then `deploy` (`deploy` has `needs: build`) — but that split is this repo's own overhead, not a
+different recommended pattern: `build` first has to compile this repo's own plugin modules and
+publish them to `mavenLocal` before `sample/` (a separate Gradle build) can even configure, since
+`compose-preview-toolkit` is the plugin's own source repo, dogfooding its own not-yet-published
+code. A real consumer applies a published plugin version and never needs that step, so their
+build+screenshot-update+deploy work fits in one job exactly as shown in "Usage". What *does*
+generalize is the ordering this split preserves: `build` runs the screenshot-baseline update
+(auto-committing any changed baselines) before `deploy` ever checks out, and `deploy` only starts
+once `build` (including its push) has completed — the same "fresh baselines before this action"
+requirement from "Requirements" above, just enforced with `needs:` across jobs instead of step
+order within one job.
 
-- `ci.yml` calls this action once with `mode: 'github-pages'`, which builds the site itself before
-  publishing: on `push` to `main` it deploys the persisted main site; on `pull_request` (`ci.yml`'s
-  trigger has no `types:` filter, so only the implicit default `[opened, synchronize, reopened]`
-  reach it) it deploys a live preview.
+- `build` builds/tests this repo's plugin modules, publishes them to `mavenLocal`, and runs
+  [`update-validate-screenshot-tests`](../update-validate-screenshot-tests) against `sample/`,
+  which auto-commits any changed baselines back to the branch.
+- `deploy` (`needs: build`) checks out fresh (a separate runner, so nothing from `build` persists),
+  re-publishes the plugin modules to its own `mavenLocal`, then calls this action once with
+  `mode: 'github-pages'`, which builds the site itself before publishing: on `push` to `main` it
+  deploys the persisted main site; on `pull_request` (`ci.yml`'s trigger has no `types:` filter, so
+  only the implicit default `[opened, synchronize, reopened]` reach it) it deploys a live preview —
+  seeing the baselines `build` just committed, since `deploy` only starts after that push lands.
 - [`nav-graph-pr-preview-teardown.yml`](../../workflows/nav-graph-pr-preview-teardown.yml) calls
   this action with `mode: 'github-pages'` on `pull_request: closed` to tear the preview down —
   kept as its own minimal workflow since teardown needs none of the Gradle/JDK/mavenLocal setup
