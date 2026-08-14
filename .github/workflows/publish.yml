@@ -60,13 +60,16 @@ jobs:
         run: ./gradlew :gradle-plugin:publishPlugins :nav-graph-gradle-plugin:publishPlugins
 
       # Maven Central (Central Portal): the annotations & ksp-processor libraries gradle-plugin
-      # references at runtime, plus nav-graph-psi-analyzer which nav-graph-gradle-plugin references.
+      # references at runtime, plus nav-graph-model/nav-graph-psi-analyzer which
+      # nav-graph-gradle-plugin references (nav-graph-model at regular compile time,
+      # nav-graph-psi-analyzer resolved fresh into an isolated Worker classpath — see
+      # ComposePreviewToolkitNavGraphPlugin's kdoc).
       #
       # --no-configuration-cache: vanniktech-maven-publish's Central Portal repository object
       # doesn't serialize cleanly under Gradle's configuration cache (enabled by default via
       # this repo's gradle.properties) — fails with "Services of type BuildFeatures are not
       # available for injection into instances of type BuildService."
-      - name: Publish annotations, ksp-processor & nav-graph-psi-analyzer to Maven Central
+      - name: Publish annotations, ksp-processor, nav-graph-model & nav-graph-psi-analyzer to Maven Central
         if: github.event_name != 'workflow_dispatch' || inputs.target == 'both' || inputs.target == 'maven-central'
         env:
           ORG_GRADLE_PROJECT_mavenCentralUsername: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
@@ -77,4 +80,5 @@ jobs:
           ./gradlew --no-configuration-cache \
             :annotations:publishAllPublicationsToMavenCentralRepository \
             :ksp-processor:publishAllPublicationsToMavenCentralRepository \
+            :nav-graph-model:publishAllPublicationsToMavenCentralRepository \
             :nav-graph-psi-analyzer:publishAllPublicationsToMavenCentralRepository

@@ -47,19 +47,19 @@ jobs:
         if: github.event_name != 'pull_request' || github.event.action != 'closed'
         uses: android-actions/setup-android@v3
 
-      - name: Build and test annotations, ksp-processor, gradle-plugin, nav-graph-psi-analyzer, nav-graph-gradle-plugin
+      - name: Build and test annotations, ksp-processor, gradle-plugin, nav-graph-model, nav-graph-psi-analyzer, nav-graph-gradle-plugin
         if: github.event_name != 'pull_request' || github.event.action != 'closed'
-        run: ./gradlew --stacktrace :annotations:build :ksp-processor:build :gradle-plugin:build :nav-graph-psi-analyzer:build :nav-graph-gradle-plugin:build
+        run: ./gradlew --stacktrace :annotations:build :ksp-processor:build :gradle-plugin:build :nav-graph-model:build :nav-graph-psi-analyzer:build :nav-graph-gradle-plugin:build
 
       # sample/ is a separate Gradle build (see sample/settings.gradle.kts) that applies the
       # plugin(s) exactly like a real consumer would, so it needs this repo's current in-progress
       # version resolvable via mavenLocal() before it can configure at all. sample/app,
       # sample/feature-a, and sample/feature-b all apply the navgraph plugin id, so
-      # nav-graph-gradle-plugin (and its nav-graph-psi-analyzer dependency) publishing is just as
-      # required here as the screenshot-testing plugin's modules, not optional.
+      # nav-graph-gradle-plugin (and its nav-graph-model/nav-graph-psi-analyzer dependencies)
+      # publishing is just as required here as the screenshot-testing plugin's modules, not optional.
       - name: Publish current version to mavenLocal for sample/ to consume
         if: github.event_name != 'pull_request' || github.event.action != 'closed'
-        run: ./gradlew --stacktrace :annotations:publishToMavenLocal :ksp-processor:publishToMavenLocal :gradle-plugin:publishToMavenLocal :nav-graph-psi-analyzer:publishToMavenLocal :nav-graph-gradle-plugin:publishToMavenLocal
+        run: ./gradlew --stacktrace :annotations:publishToMavenLocal :ksp-processor:publishToMavenLocal :gradle-plugin:publishToMavenLocal :nav-graph-model:publishToMavenLocal :nav-graph-psi-analyzer:publishToMavenLocal :nav-graph-gradle-plugin:publishToMavenLocal
 
       # Dogfeeds this repo's own composite action against the sample module, so a broken
       # action.yml or a broken plugin/processor change surfaces in this repo's own CI.

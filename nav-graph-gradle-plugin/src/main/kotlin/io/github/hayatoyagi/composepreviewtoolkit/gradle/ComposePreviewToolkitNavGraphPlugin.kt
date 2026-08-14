@@ -18,16 +18,25 @@ import java.util.concurrent.Callable
  * land on the classpath of a consumer who only wants screenshot-test generation. This plugin
  * doesn't require that other plugin to also be applied — a module can use either, both, or neither.
  *
+ * `KotlinPsiParser`/`NavNodeScanner`/`NavEdgeScanner` (and `kotlin-compiler-embeddable` itself)
+ * never touch this plugin's own regular classpath either: [apply] resolves them fresh, by
+ * coordinate, into a `Configuration` fed to a Gradle Worker with an isolated classloader (see
+ * [GenerateDebugNavGraphSite]/[NavGraphScanWorkAction]) — `nav-graph-psi-analyzer` is a
+ * `compileOnly` dependency here, not `implementation`. Every module that applies this plugin used
+ * to pay `kotlin-compiler-embeddable`'s own classpath-resolution cost at plain plugin-application
+ * time, whether or not it ever ran `generateDebugNavGraphSite`; now that cost is paid once, only
+ * when the task actually runs. The savings scale with graph size — negligible for a couple of
+ * modules, real for a monorepo with many.
+ *
  * [Project.discoverGraphModules] reads a dependency project's sources directly, so this plugin
- * doesn't need to be applied there for its declarations to be found — a dependency module with no
- * Compose Kotlin Gradle subplugin of its own (e.g. one that just declares route types, with no
- * Composable UI) is discovered and scanned correctly either way. The one case where this plugin
- * *should* also be applied on the dependency project: if that project applies its own Compose
- * Kotlin Gradle subplugin (`org.jetbrains.kotlin.plugin.compose`) but doesn't apply this one,
- * `kotlin-compiler-embeddable` ends up present on only some Compose modules' plugin classpaths,
- * and Gradle can resolve the Kotlin Gradle plugin via mismatched classloaders across modules (a
- * real, reproduced failure mode — Gradle logs "The Kotlin Gradle plugin was loaded multiple times
- * in different subprojects, which is not supported and may break the build").
+ * isn't functionally required there for its declarations to be found — a dependency module with
+ * no Compose Kotlin Gradle subplugin of its own (e.g. one that just declares route types, with no
+ * Composable UI) is discovered and scanned correctly either way. The one case where it *should*
+ * still be applied: a dependency module that applies its own Compose Kotlin Gradle subplugin
+ * (`org.jetbrains.kotlin.plugin.compose`) can otherwise hit a separate, harder Kotlin-Gradle-Plugin
+ * classloader mismatch ("The Kotlin Gradle plugin was loaded multiple times in different
+ * subprojects") that this isolation does **not** eliminate — root-caused separately in
+ * `HayatoYagi/compose-preview-toolkit#53`.
  *
  * Unlike `ComposePreviewToolkitPlugin`, this plugin needs no KSP-apply-timing `afterEvaluate`
  * gymnastics: there's no KSP involved at all here, just plain source files read directly by the
@@ -53,6 +62,11 @@ class ComposePreviewToolkitNavGraphPlugin : Plugin<Project> {
             routeNameSuffixesToStrip.convention(setOf("Destination", "Route"))
         }
 
+        val navGraphScanWorkerClasspath =
+            target.configurations.detachedConfiguration(
+                target.dependencies.create("io.github.hayatoyagi:compose-preview-toolkit-nav-graph-psi-analyzer:$PLUGIN_VERSION"),
+            ) + target.files(javaClass.protectionDomain.codeSource.location)
+
         val generateDebugNavGraphSite =
             target.tasks.register("generateDebugNavGraphSite", GenerateDebugNavGraphSite::class.java) { task ->
                 task.routeNameSuffixesToStrip.set(extension.routeNameSuffixesToStrip)
@@ -63,6 +77,7 @@ class ComposePreviewToolkitNavGraphPlugin : Plugin<Project> {
                 // be determined.
                 task.projectDirectory.set(target.layout.projectDirectory)
                 task.outputDirectory.set(target.layout.buildDirectory.dir("composePreviewToolkit/navGraphSite/debug"))
+                task.navGraphScanWorkerClasspath.from(navGraphScanWorkerClasspath)
             }
 
         // Memoized (`by lazy`): every Callable below reads this same value, but
