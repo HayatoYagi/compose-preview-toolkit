@@ -24,7 +24,14 @@ class ComposePreviewToolkitPlugin : Plugin<Project> {
             screenshotValidationApiVersion.convention(DEFAULT_SCREENSHOT_VALIDATION_API_VERSION)
         }
 
-        target.enableScreenshotTestSourceSet()
+        // Guarded by withPlugin rather than called eagerly: this plugin is documented to be
+        // applied after com.android.application/com.android.library (see README), so in normal
+        // use the callback fires synchronously, right here, with no timing change. But an eager
+        // extensions.getByName("android") call fails hard for anything that applies this plugin
+        // without AGP already present — including Gradle's own precompiled-script-plugin accessor
+        // generation, which probes a plugin's apply() in a synthetic project with no AGP applied.
+        target.pluginManager.withPlugin("com.android.library") { target.enableScreenshotTestSourceSet() }
+        target.pluginManager.withPlugin("com.android.application") { target.enableScreenshotTestSourceSet() }
 
         target.pluginManager.apply("com.android.compose.screenshot")
         target.pluginManager.apply("com.google.devtools.ksp")
