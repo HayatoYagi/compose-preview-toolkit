@@ -274,7 +274,7 @@ generated from this same sample on every push to `main`.
 - Only the `debug` build type is supported currently.
 - AGP's Compose Preview Screenshot Testing is still an alpha feature (`0.0.1-alpha1x` as of this
   writing); breaking changes upstream may require a plugin update.
-- The nav-graph plugin's node/edge analysis is PSI-only, not type-resolved, throughout (see "Nav
+- The nav-graph plugin's node/edge analysis is syntactic, not type-resolved, throughout (see "Nav
   Graph" above for its two edge-detection modes), so results are best-effort; node↔screenshot
   matching is a configurable naming heuristic, not a guaranteed pairing.
 
