@@ -28,7 +28,7 @@ navgraph plugins), `sample/feature-a`, and `sample/feature-b` (screenshot-test p
 there discovers `feature-a`/`feature-b` via `:app`'s own project dependencies and scans all three
 together (see README.md's "Gallery site" subsection). `sample/build.gradle.kts` declares every
 plugin used anywhere in `sample/` with `apply false`, which is what makes it safe for `feature-a`/
-`feature-b` to skip the navgraph plugin — see `nav-graph-gradle-plugin`'s kdoc.
+`feature-b` to skip the navgraph plugin.
 
 ## Opening a PR
 

@@ -1,6 +1,6 @@
-// Every plugin used anywhere in sample/, declared once with `apply false`, so every leaf module's
-// resolved plugin classpath is identical — avoids a Kotlin-Gradle-plugin classloader mismatch. See
-// nav-graph-gradle-plugin's kdoc and HayatoYagi/compose-preview-toolkit#53.
+// Every plugin used anywhere in sample/, declared once with `apply false` — standard Gradle
+// multi-module practice, and avoids a Kotlin-Gradle-plugin classloader mismatch otherwise
+// triggered by asymmetric plugin application across subprojects.
 plugins {
     alias(libs.plugins.androidApplication) apply false
     alias(libs.plugins.androidLibrary) apply false

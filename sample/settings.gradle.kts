@@ -13,8 +13,7 @@
 //             :nav-graph-model:publishToMavenLocal :nav-graph-psi-analyzer:publishToMavenLocal \
 //             :nav-graph-gradle-plugin:publishToMavenLocal
 // then this module resolves everything via mavenLocal() below. See the root README and
-// CONTRIBUTING.md. `sample/build.gradle.kts` declares every plugin used anywhere in this build
-// with `apply false` — see nav-graph-gradle-plugin's kdoc for why.
+// CONTRIBUTING.md.
 pluginManagement {
     repositories {
         mavenLocal()
