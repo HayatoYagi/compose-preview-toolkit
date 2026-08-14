@@ -174,14 +174,16 @@ data class GalleryNode(
  * looking up the right node's data in the page's click-handler data.
  *
  * **Node thumbnails** are embedded directly in the node itself using Mermaid v11's image-shape
- * node syntax (`nodeId@{ img: "...", label: "...", w: ..., h: ..., constraint: "off" }`, confirmed
- * against Mermaid's current flowchart docs — this is a distinct mechanism from the markdown-string
+ * node syntax (`nodeId@{ img: "...", label: "...", h: ..., constraint: "on" }`, confirmed against
+ * Mermaid's current flowchart docs — this is a distinct mechanism from the markdown-string
  * (backtick) node labels also introduced around v10/v11, which only support text formatting, not
  * embedded images). A node with no matched thumbnail falls back to a plain quoted-label rect node
- * (`nodeId["label"]`) since there's nothing to embed. `w`/`h` are fixed at [THUMBNAIL_NODE_SIZE_PX]
- * so a large source screenshot never blows up the rendered node size — the *data* is still fully
- * embedded (see [buildGallerySiteHtml]'s `maxTextSize` note for the corresponding fragility this
- * creates and how it's mitigated), only the on-screen footprint is constrained here.
+ * (`nodeId["label"]`) since there's nothing to embed. `h` is fixed at [THUMBNAIL_NODE_HEIGHT_PX] so
+ * a large source screenshot never blows up the rendered node size (the *data* is still fully
+ * embedded — see [buildGallerySiteHtml]'s `maxTextSize` note for the corresponding fragility this
+ * creates and how it's mitigated); `constraint: "on"` leaves `w` for Mermaid to compute from the
+ * source image's own aspect ratio, since Android screenshots are routinely tall/portrait and
+ * forcing a fixed `w` too (`constraint: "off"`) visibly stretched/distorted them.
  *
  * **Click-to-reveal** is wired via Mermaid's `click nodeId call callbackName()` binding syntax
  * (confirmed against the current docs: the bound JS function receives the clicked node's id as its
@@ -213,7 +215,7 @@ fun buildMermaidGraph(
             if (representative != null) {
                 append(
                     "$nodeId@{ img: \"${representative.dataUri}\", label: \"${node.simpleName.mermaidLabel()}\", " +
-                        "pos: \"b\", w: $THUMBNAIL_NODE_SIZE_PX, h: $THUMBNAIL_NODE_SIZE_PX, constraint: \"off\" }",
+                        "pos: \"b\", h: $THUMBNAIL_NODE_HEIGHT_PX, constraint: \"on\" }",
                 ).append(";\n")
             } else {
                 append("$nodeId[\"${node.simpleName.mermaidLabel()}\"]").append(";\n")
@@ -228,8 +230,13 @@ fun buildMermaidGraph(
     }
 }
 
-/** Fixed on-screen width/height (in px) every Mermaid-embedded node thumbnail is constrained to, regardless of the source PNG's own dimensions. See [buildMermaidGraph]. */
-private const val THUMBNAIL_NODE_SIZE_PX = 96
+/**
+ * Fixed on-screen height (in px) every Mermaid-embedded node thumbnail is constrained to; width is
+ * left for Mermaid to compute (`constraint: "on"` in [buildMermaidGraph]) so a screenshot's own
+ * aspect ratio — routinely tall/portrait for an Android screen, nothing like square — is preserved
+ * instead of being squashed into a fixed box.
+ */
+private const val THUMBNAIL_NODE_HEIGHT_PX = 96
 
 /** Name of the global JS function [buildMermaidGraph]'s `click ... call ...()` bindings invoke and [buildGallerySiteHtml] defines. Kept as one constant so the two can never drift apart. */
 private const val NODE_CLICK_CALLBACK = "cptShowScreenshots"
