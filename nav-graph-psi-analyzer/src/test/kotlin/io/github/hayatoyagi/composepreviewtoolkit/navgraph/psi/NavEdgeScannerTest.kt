@@ -326,4 +326,149 @@ class NavEdgeScannerTest {
 
         assertTrue(result.edges.isEmpty(), "expected no edges but found: ${result.edges}")
     }
+
+    @Test
+    fun `a non-standard-named callback with an explicit NavKey parameter type is found via declared type, not name`() {
+        val file = parser.parse(
+            "TypedDirect.kt",
+            """
+            package com.example.typeddirect
+
+            import androidx.navigation3.runtime.NavKey
+            import androidx.navigation3.runtime.entry
+
+            object TypedSourceRoute : NavKey
+            object TypedTargetRoute : NavKey
+
+            fun registerTypedDirect(goTo: (NavKey) -> Unit) {
+                entry<TypedSourceRoute> { goTo(TypedTargetRoute) }
+                entry<TypedTargetRoute> { TypedTargetScreen() }
+            }
+
+            fun TypedTargetScreen() = Unit
+            """.trimIndent(),
+        )
+
+        val result = NavEdgeScanner().scan(listOf(file))
+
+        assertEquals(
+            listOf(NavEdge("com.example.typeddirect.TypedSourceRoute", "com.example.typeddirect.TypedTargetRoute")),
+            result.edges,
+        )
+    }
+
+    @Test
+    fun `a callback parameter typed to a specific known route (not NavKey itself) is also recognized`() {
+        val file = parser.parse(
+            "TypedRouteSpecific.kt",
+            """
+            package com.example.typedroutespecific
+
+            import androidx.navigation3.runtime.NavKey
+            import androidx.navigation3.runtime.entry
+
+            object TypedRouteSpecificSource : NavKey
+            object TypedRouteSpecificTarget : NavKey
+
+            fun registerTypedRouteSpecific(goTo: (TypedRouteSpecificTarget) -> Unit) {
+                entry<TypedRouteSpecificSource> { goTo(TypedRouteSpecificTarget) }
+                entry<TypedRouteSpecificTarget> { TypedRouteSpecificTargetScreen() }
+            }
+
+            fun TypedRouteSpecificTargetScreen() = Unit
+            """.trimIndent(),
+        )
+
+        val result = NavEdgeScanner().scan(listOf(file))
+
+        assertEquals(
+            listOf(
+                NavEdge(
+                    "com.example.typedroutespecific.TypedRouteSpecificSource",
+                    "com.example.typedroutespecific.TypedRouteSpecificTarget",
+                ),
+            ),
+            result.edges,
+        )
+    }
+
+    @Test
+    fun `a non-standard-named callback threaded through wrapper functions is found by declared type at the call site`() {
+        // Mirrors pattern (i)'s callback-threading shape (FeatureAScreen references its callback by
+        // value, not by invoking it, forcing reverse-threading to the wiring call site) but the
+        // wiring call site forwards straight into the app's own NavKey-typed callback instead of a
+        // name-matched navigateTo(...) call.
+        val file = parser.parse(
+            "TypedThreaded.kt",
+            """
+            package com.example.typedthreaded
+
+            import androidx.navigation3.runtime.EntryProviderScope
+            import androidx.navigation3.runtime.NavKey
+            import androidx.navigation3.runtime.entry
+            import androidx.navigation3.runtime.entryProvider
+
+            object ThreadedFeatureRoute : NavKey
+            object ThreadedDestRoute : NavKey
+
+            fun threadedAppNavHost(onNavigate: (NavKey) -> Unit) {
+                entryProvider<NavKey> {
+                    entry<ThreadedDestRoute> { ThreadedDestScreen() }
+                    threadedFeatureNavEntries(goTo = { onNavigate(ThreadedDestRoute) })
+                }
+            }
+
+            fun EntryProviderScope<NavKey>.threadedFeatureNavEntries(goTo: (NavKey) -> Unit) {
+                entry<ThreadedFeatureRoute> { ThreadedFeatureScreen(goTo) }
+            }
+
+            fun ThreadedDestScreen() = Unit
+
+            fun ThreadedFeatureScreen(goTo: (NavKey) -> Unit) {
+                ThreadedButton(onClick = goTo)
+            }
+
+            fun ThreadedButton(onClick: (NavKey) -> Unit) = Unit
+            """.trimIndent(),
+        )
+
+        val result = NavEdgeScanner().scan(listOf(file))
+
+        assertEquals(
+            listOf(NavEdge("com.example.typedthreaded.ThreadedFeatureRoute", "com.example.typedthreaded.ThreadedDestRoute")),
+            result.edges,
+        )
+    }
+
+    @Test
+    fun `a callback relying purely on type inference, with no explicit annotation, is not found - known limitation`() {
+        // Matches the documented gap: a local val lambda with an untyped parameter is invisible to
+        // this purely-syntactic scanner regardless of naming, since it isn't even tracked as a live
+        // callable (only named-function value parameters, which always carry an explicit type in
+        // Kotlin, are). No edge, no warning, no crash.
+        val file = parser.parse(
+            "UntypedWrapper.kt",
+            """
+            package com.example.untyped
+
+            import androidx.navigation3.runtime.NavKey
+            import androidx.navigation3.runtime.entry
+
+            object UntypedSourceRoute : NavKey
+            object UntypedTargetRoute : NavKey
+
+            fun registerUntyped() {
+                val goSomewhere = { key -> backStack.add(key) }
+                entry<UntypedSourceRoute> { goSomewhere(UntypedTargetRoute) }
+                entry<UntypedTargetRoute> { UntypedTargetScreen() }
+            }
+
+            fun UntypedTargetScreen() = Unit
+            """.trimIndent(),
+        )
+
+        val result = NavEdgeScanner().scan(listOf(file))
+
+        assertTrue(result.edges.isEmpty(), "expected no edges but found: ${result.edges}")
+    }
 }
