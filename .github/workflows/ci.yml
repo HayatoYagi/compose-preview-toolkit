@@ -4,10 +4,14 @@ on:
   push:
     branches: [main]
   pull_request:
+    types: [opened, reopened, synchronize, closed]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  # rossjrw/pr-preview-action's own README recommends never cancelling an in-progress run in this
+  # group: a cancelled run could be interrupted between pushing the preview and updating its PR
+  # comment, leaving the two out of sync.
+  cancel-in-progress: false
 
 permissions:
   contents: write
@@ -23,19 +27,29 @@ jobs:
           ref: ${{ github.head_ref || github.ref_name }}
           fetch-depth: 0
 
+      # Everything below except the final deploy step is skipped when a PR closes — a closed PR
+      # only needs its preview torn down (which deploy-nav-graph-site's own `mode: 'github-pages'`
+      # already does without building anything, matching rossjrw/pr-preview-action's own
+      # recommended single-workflow pattern: gate the build, not the trigger). Running the full
+      # toolchain setup/build/publish/screenshot-validate chain just to reach a teardown that needs
+      # none of it would waste CI time on every PR close for no benefit.
       - name: Set up JDK
+        if: github.event_name != 'pull_request' || github.event.action != 'closed'
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
           java-version: '21'
 
       - name: Setup Gradle
+        if: github.event_name != 'pull_request' || github.event.action != 'closed'
         uses: gradle/actions/setup-gradle@v4
 
       - name: Install Android SDK
+        if: github.event_name != 'pull_request' || github.event.action != 'closed'
         uses: android-actions/setup-android@v3
 
       - name: Build and test annotations, ksp-processor, gradle-plugin, nav-graph-psi-analyzer, nav-graph-gradle-plugin
+        if: github.event_name != 'pull_request' || github.event.action != 'closed'
         run: ./gradlew --stacktrace :annotations:build :ksp-processor:build :gradle-plugin:build :nav-graph-psi-analyzer:build :nav-graph-gradle-plugin:build
 
       # sample/ is a separate Gradle build (see sample/settings.gradle.kts) that applies the
@@ -45,28 +59,29 @@ jobs:
       # nav-graph-gradle-plugin (and its nav-graph-psi-analyzer dependency) publishing is just as
       # required here as the screenshot-testing plugin's modules, not optional.
       - name: Publish current version to mavenLocal for sample/ to consume
+        if: github.event_name != 'pull_request' || github.event.action != 'closed'
         run: ./gradlew --stacktrace :annotations:publishToMavenLocal :ksp-processor:publishToMavenLocal :gradle-plugin:publishToMavenLocal :nav-graph-psi-analyzer:publishToMavenLocal :nav-graph-gradle-plugin:publishToMavenLocal
 
       # Dogfeeds this repo's own composite action against the sample module, so a broken
       # action.yml or a broken plugin/processor change surfaces in this repo's own CI.
       - name: Update & validate sample screenshot tests
+        if: github.event_name != 'pull_request' || github.event.action != 'closed'
         uses: ./.github/actions/update-validate-screenshot-tests
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           working-directory: sample
 
       # Builds and publishes sample/app's nav graph site: on push to main, this deploys the
-      # persisted main site to gh-pages' root; on pull_request (ci.yml's trigger has no `types:`
-      # filter, so only the implicit default [opened, synchronize, reopened] reach it), this
+      # persisted main site to gh-pages' root; on pull_request opened/reopened/synchronize, this
       # deploys a live preview — including this run's freshly-committed screenshot baselines from
       # the step above — to pr-preview/pr-<number>/ on gh-pages, with a sticky PR comment linking
-      # to it. Kept in this same job (not a separate workflow triggered off the same pull_request
-      # event) so it can't race the baseline-update step above: a standalone workflow could check
-      # out and build before that step's auto-commit push landed, deploying a preview with stale
-      # thumbnails. Also serves as this repo's build dogfooding for both event types, since a
-      # broken action.yml or plugin/analyzer change fails this step just the same. Teardown on PR
-      # close is handled by the separate nav-graph-pr-preview-teardown.yml, which doesn't need any
-      # of this job's Gradle/mavenLocal setup.
+      # to it; on pull_request closed, it tears that preview down (deploy-nav-graph-site's own
+      # `if: github.event.action != 'closed'` skips its build step, so this runs fast even though
+      # every step above it was skipped too). Kept in this same job/workflow — not a separate one
+      # — so the preview deploy can't race the baseline-update step above (a standalone workflow
+      # could check out and build before that step's auto-commit push landed, deploying a preview
+      # with stale thumbnails), and so there's exactly one workflow to configure for the full
+      # preview-plus-teardown experience, not two.
       - name: Deploy sample nav graph site to GitHub Pages
         uses: ./.github/actions/deploy-nav-graph-site
         with:

@@ -30,13 +30,17 @@ task (`generateDebugNavGraphSite`) and optionally publishes the result via the `
 
 ## Usage
 
-The realistic default is a screenshot-testing setup feeding this action's gallery thumbnails, so
-the primary example below runs a baseline-update step first, in the same job, before calling this
-action — swap the "Update screenshot baselines" step for whatever your project uses to regenerate
-and commit its baselines (this repo's own
-[`update-validate-screenshot-tests`](../update-validate-screenshot-tests) composite action is one
-example); what matters is that it runs before this action, in the same job, so its baseline commit
-is on disk when this action reads reference images:
+One workflow handles the whole `mode: 'github-pages'` lifecycle — persisted main site, PR
+previews, and teardown on close — matching
+[`rossjrw/pr-preview-action`'s own recommended pattern](https://github.com/rossjrw/pr-preview-action#usage):
+a single `pull_request` trigger including `closed`, with the expensive steps (anything this action
+itself doesn't need to tear a preview down) skipped on that event via `if:`, rather than a second
+workflow file just for cleanup. The realistic default also has a screenshot-testing setup feeding
+this action's gallery thumbnails, so the example below runs a baseline-update step first, in the
+same job — swap it for whatever your project uses to regenerate and commit its baselines (this
+repo's own [`update-validate-screenshot-tests`](../update-validate-screenshot-tests) composite
+action is one example); what matters is that it runs before this action, in the same job, so its
+baseline commit is on disk when this action reads reference images:
 
 ```yaml
 on:
@@ -44,6 +48,13 @@ on:
     branches: [main]
   pull_request:
     types: [opened, reopened, synchronize, closed]
+
+# Recommended by rossjrw/pr-preview-action's own README: never cancel an in-progress run in this
+# group, since a cancelled run could be interrupted between pushing the preview and updating its
+# PR comment, leaving the two out of sync.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: false
 
 permissions:
   contents: write
@@ -55,10 +66,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Runs first, in this same job: refreshes screenshot baselines and commits any changes
-      # back to the branch, so the gallery thumbnails below reflect the latest UI. Swap this
-      # for whatever step regenerates your project's baselines.
+      # Skipped when the PR closes — nothing here is needed to tear down a preview. Swap for
+      # whatever step regenerates your project's baselines.
       - name: Update screenshot baselines
+        if: github.event_name != 'pull_request' || github.event.action != 'closed'
         uses: your-org/your-repo/.github/actions/update-screenshot-baselines@main
 
       - uses: HayatoYagi/compose-preview-toolkit/.github/actions/deploy-nav-graph-site@v0.1.0
@@ -68,10 +79,10 @@ jobs:
           mode: 'github-pages' # 'build' (default) | 'github-pages'
 ```
 
-If your project has no screenshot baselines at all (or doesn't care about gallery thumbnails), the
-baseline-update step is unnecessary — the rest of the setup is unchanged, and `mode: 'github-pages'`
-still needs no more boilerplate than one action call, with correct behavior for
-push/open/sync/close all handled internally.
+This action call itself stays unconditional: it already skips its own build step on `closed` (see
+"Modes" below), so it runs fast on that event even though everything above it was skipped too. If
+your project has no screenshot baselines at all (or doesn't care about gallery thumbnails), drop
+the baseline-update step — the rest is unchanged.
 
 If the site-generating module lives in a separate Gradle build (own `gradlew`), set
 `working-directory` — e.g. this repo's own `sample/` (see `sample/settings.gradle.kts` for why
@@ -103,21 +114,15 @@ it's separate).
 
 ## How this repo uses it
 
-`ci.yml`'s single job follows the same shape as "Usage" above — screenshot-baseline update, then
-this action — with this repo's own extra setup at the front (building its own plugin modules and
-publishing them to `mavenLocal`, since `compose-preview-toolkit` is the plugin's own source repo
-dogfooding its own not-yet-published code; a real consumer applies a published plugin version and
-skips that step entirely):
-
-- `ci.yml` builds/tests this repo's plugin modules, publishes them to `mavenLocal`, runs
-  [`update-validate-screenshot-tests`](../update-validate-screenshot-tests) against `sample/`
-  (auto-committing any changed baselines), then calls this action with `mode: 'github-pages'`: on
-  `push` to `main` it deploys the persisted main site; on `pull_request` (`ci.yml`'s trigger has no
-  `types:` filter, so only the implicit default `[opened, synchronize, reopened]` reach it) it
-  deploys a live preview.
-- [`nav-graph-pr-preview-teardown.yml`](../../workflows/nav-graph-pr-preview-teardown.yml) — a
-  separate, minimal workflow triggered only on `pull_request: closed` — calls this action with
-  `mode: 'github-pages'` to tear the preview down, skipping all of `ci.yml`'s unrelated setup.
+`ci.yml`'s single job/workflow follows exactly the "Usage" shape above — one `pull_request`
+trigger including `closed`, the same `concurrency` block, screenshot-baseline update then this
+action, expensive steps skipped on `closed` — with this repo's own extra setup at the front
+(building its own plugin modules and publishing them to `mavenLocal`, since
+`compose-preview-toolkit` is the plugin's own source repo dogfooding its own not-yet-published
+code; a real consumer applies a published plugin version and skips that step entirely). On `push`
+to `main` it deploys the persisted main site; on `pull_request` opened/reopened/synchronize it
+deploys a live preview; on `pull_request: closed` it tears that preview down — all from this one
+workflow, no separate teardown file to configure.
 
 ## Inputs
 

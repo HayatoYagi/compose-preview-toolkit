@@ -240,10 +240,9 @@ Two modes, selected by the `mode` input:
   same branch — requires repo **Settings → Pages → Source** = **Deploy from branch** pointed at
   `pages-branch`.
 
-This repo's own `ci.yml` (plus
-[`nav-graph-pr-preview-teardown.yml`](.github/workflows/nav-graph-pr-preview-teardown.yml)) is a
-concrete worked example: a single `mode: 'github-pages'` call handles both a persisted main site
-and live PR previews for `sample/app`'s nav graph, sharing one `gh-pages` branch.
+This repo's own [`ci.yml`](.github/workflows/ci.yml) is a concrete worked example: a single
+`mode: 'github-pages'` call, in one workflow, handles a persisted main site, live PR previews, and
+teardown for `sample/app`'s nav graph.
 
 See [.github/actions/deploy-nav-graph-site/README.md](.github/actions/deploy-nav-graph-site/README.md)
 for the full mode-by-mode breakdown and required permissions/settings, or
