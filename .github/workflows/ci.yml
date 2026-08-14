@@ -55,20 +55,51 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           working-directory: sample
 
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref || github.ref_name }}
+          fetch-depth: 0
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Install Android SDK
+        uses: android-actions/setup-android@v3
+
+      # This is a fresh runner with no local Maven repo state, so the modules that sample/
+      # resolves via mavenLocal() (see the `build` job's comment on the same step) need
+      # publishing again here — nothing carries over between jobs. Only the publish tasks are
+      # needed (not the explicit `:build` calls the `build` job runs first): `publishToMavenLocal`
+      # already depends on compiling/jarring each module, and the `build` job already ran the
+      # tests, so re-running `:build` here would just redundantly re-verify what CI already
+      # confirmed on this same commit.
+      - name: Publish current version to mavenLocal for sample/ to consume
+        run: ./gradlew --stacktrace :annotations:publishToMavenLocal :ksp-processor:publishToMavenLocal :gradle-plugin:publishToMavenLocal :nav-graph-psi-analyzer:publishToMavenLocal :nav-graph-gradle-plugin:publishToMavenLocal
+
       # Builds and publishes sample/app's nav graph site, dogfooding both the build and the
       # publish step in one call: on push to main, this deploys the persisted main site to
       # gh-pages' root; on pull_request (ci.yml's trigger has no `types:` filter, so only the
       # implicit default [opened, synchronize, reopened] reach it), this deploys a live preview —
-      # including this run's freshly-committed screenshot baselines from the step above — to
+      # including the `build` job's freshly-committed screenshot baselines — to
       # pr-preview/pr-<number>/ on gh-pages, with a sticky PR comment linking to it. Deliberately
-      # kept in this same job/checkout (not a separate workflow triggered off the same
-      # pull_request event) so the preview deploy can't race the baseline-update step above: a
-      # standalone workflow could check out and build before that step's auto-commit push landed,
-      # deploying a preview with stale thumbnails. Also serves as this repo's build dogfooding for
-      # both event types, since a broken action.yml or plugin/analyzer change fails this step just
-      # the same. Teardown on PR close is handled by the separate
-      # nav-graph-pr-preview-teardown.yml, which doesn't need any of this job's Gradle/mavenLocal
-      # setup.
+      # kept `needs: build` (not a separate workflow triggered off the same pull_request event) so
+      # the preview deploy can't race the `build` job's baseline-update step: a standalone
+      # workflow could check out and build before that step's auto-commit push landed, deploying
+      # a preview with stale thumbnails. Also serves as this repo's build dogfooding for both
+      # event types, since a broken action.yml or plugin/analyzer change fails this step just the
+      # same. Teardown on PR close is handled by the separate nav-graph-pr-preview-teardown.yml,
+      # which doesn't need any of this job's Gradle/mavenLocal setup.
       - name: Deploy sample nav graph site to GitHub Pages
         uses: ./.github/actions/deploy-nav-graph-site
         with:
