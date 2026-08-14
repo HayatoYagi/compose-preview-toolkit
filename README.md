@@ -163,15 +163,10 @@ plugins {
 ./gradlew generateDebugNavGraph
 ```
 
-Writes, under `build/generated/composePreviewToolkit/navGraph/debug/` (scoped to that module's own
-sources):
-
-- `ComposePreviewToolkitNavNodeIndex.txt` — tab-separated
-  `packageName\tsimpleName\tqualifiedName\tfilePath\tline\tfilePathIsRepoRelative`, where
-  `filePath`/`line` locate the route's `entry<X> { ... }` registration call site (not the bare
-  route declaration), and `filePathIsRepoRelative` says whether `filePath` is relative to the git
-  repository root (vs. some best-effort fallback base directory)
-- `ComposePreviewToolkitNavEdgeIndex.txt` — tab-separated `sourceRouteQualifiedName\ttargetRouteQualifiedName`
+Writes a node + edge index under `build/generated/composePreviewToolkit/navGraph/debug/` (scoped
+to that module's own sources) — an intermediate format consumed by the site-generation step below;
+each node also records the source location of its `entry<X> { ... }` registration call site, used
+later for the gallery site's "view source" link.
 
 Edge detection handles two navigation-wiring shapes with one algorithm: a callback threaded through
 intermediate composables before finally being invoked far from where it's declared (e.g. a feature
@@ -203,8 +198,7 @@ composePreviewToolkitNavGraph {
 This task:
 
 - Aggregates each `graphModules` project's node index, plus (for projects also applying the
-  `io.github.hayatoyagi.compose-preview-toolkit` plugin) their
-  `ComposePreviewToolkitScreenshotIndex*.txt` + `src/screenshotTestDebug/reference/**/*.png`
+  `io.github.hayatoyagi.compose-preview-toolkit` plugin) their screenshot index and reference
   baselines — via real Gradle cross-project task dependencies, so running the aggregator's task
   alone triggers every graph module's own `generateDebugNavGraph`/`kspDebugKotlin` first.
 - Re-scans edges project-wide across every `graphModules` project's raw sources, rather than
