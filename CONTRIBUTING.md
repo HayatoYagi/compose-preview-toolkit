@@ -15,7 +15,7 @@ it can build at all:
 cd sample
 ./gradlew updateDebugScreenshotTest
 ./gradlew validateDebugScreenshotTest
-./gradlew :app:generateDebugNavGraph :feature-a:generateDebugNavGraph :feature-b:generateDebugNavGraph
+./gradlew :app:generateDebugNavGraphSite
 ```
 
 Re-run the `publishToMavenLocal` step after any change to `annotations`, `ksp-processor`,
@@ -23,10 +23,9 @@ Re-run the `publishToMavenLocal` step after any change to `annotations`, `ksp-pr
 
 `sample/` is itself multi-module: `sample/app` (Nav3 host, applies both the screenshot-test and
 navgraph plugins), `sample/feature-a`, and `sample/feature-b` (navgraph plugin only — see
-`AppNavHost.kt` for how they're wired). `generateDebugNavGraph` writes each module's own node
-index under that module's `build/generated/composePreviewToolkit/navGraph/debug/`, module-local by
-design; cross-module aggregation is handled separately by `generateDebugNavGraphSite` (see
-README.md's "Gallery site" subsection).
+`AppNavHost.kt` for how they're wired). `:app` is the aggregator: running `generateDebugNavGraphSite`
+there discovers `feature-a`/`feature-b` via `:app`'s own project dependencies and scans all three
+together (see README.md's "Gallery site" subsection).
 
 ## Opening a PR
 
