@@ -217,7 +217,9 @@ Mermaid.js graph diagram of every node and detected edge (Mermaid loaded from a 
 time — affects only the viewer's browser, not build reproducibility), plus a thumbnail gallery
 (thumbnails embedded as base64 data URIs). See `sample/app`/`sample/feature-a`/`sample/feature-b`
 for a worked example, including `feature-b`'s "Restart from Feature A" button, which demonstrates
-the direct-call edge pattern.
+the direct-call edge pattern — or see it live at
+[hayatoyagi.github.io/compose-preview-toolkit](https://hayatoyagi.github.io/compose-preview-toolkit/),
+generated from that same sample on every push to `main`.
 
 ### Composite GitHub Action
 
