@@ -252,12 +252,8 @@ for the full mode-by-mode breakdown and required permissions/settings, or
 
 ## Sample App
 
-`sample/` is a minimal, multi-module Android app demonstrating end-to-end usage (not published).
-It's a **separate Gradle build** (its own `settings.gradle.kts`, `gradlew`) rather than a
-subproject of the root build — see the comment at the top of `sample/settings.gradle.kts` for why:
-it applies the plugin(s) exactly like a real consumer would (`id("io.github.hayatoyagi.compose-preview-toolkit")
-version "<version>"`), and that version is always ahead of whatever's actually published while
-this repo is under active development.
+`sample/` is a minimal, multi-module Android app demonstrating end-to-end usage (not published),
+applying the plugin(s) exactly like a real consumer would.
 
 `sample/app` is a Navigation3 app wiring together `sample/feature-a` and `sample/feature-b`,
 demonstrating the nav-graph plugin's node extraction and gallery site generation (see "Nav Graph"
