@@ -1,6 +1,5 @@
 package io.github.hayatoyagi.composepreviewtoolkit.gradle
 
-import io.github.hayatoyagi.composepreviewtoolkit.navgraph.psi.KotlinPsiParser
 import io.github.hayatoyagi.composepreviewtoolkit.navgraph.psi.NavEdgeScanner
 import io.github.hayatoyagi.composepreviewtoolkit.navgraph.psi.NavNodeScanner
 import org.gradle.api.DefaultTask
@@ -9,6 +8,7 @@ import org.gradle.api.file.DirectoryProperty
 import org.gradle.api.provider.Property
 import org.gradle.api.provider.SetProperty
 import org.gradle.api.tasks.CacheableTask
+import org.gradle.api.tasks.Classpath
 import org.gradle.api.tasks.Input
 import org.gradle.api.tasks.InputFiles
 import org.gradle.api.tasks.Internal
@@ -16,7 +16,9 @@ import org.gradle.api.tasks.OutputDirectory
 import org.gradle.api.tasks.PathSensitive
 import org.gradle.api.tasks.PathSensitivity
 import org.gradle.api.tasks.TaskAction
+import org.gradle.workers.WorkerExecutor
 import java.util.Base64
+import javax.inject.Inject
 
 /**
  * Aggregates screenshot indexes/baselines ([screenshotIndexFiles]/[screenshotReferenceImages]) —
@@ -48,11 +50,11 @@ import java.util.Base64
  *
  * So this task re-parses the raw `.kt` sources of every discovered graph module project
  * ([edgeSourceFiles] — the name undersells it, it's the basis for node detection too) and runs one
- * project-wide [NavNodeScanner.scan]/[NavEdgeScanner.scan] pair over all of them together — the
- * same shape [NavEdgeScannerTest]'s own multi-file fixtures already exercise, and the only scan
- * scope that can see both a cross-module edge and a cross-module node's real declaration. An
- * unresolvable route declaration is a hard failure (see `EntryRegistrations.kt`'s
- * `resolveDeclaration`/`toNavNode`).
+ * project-wide [NavNodeScanner.scan]/[NavEdgeScanner.scan] pair over all of them together (inside
+ * [NavGraphScanWorkAction], see its kdoc for why) — the same shape [NavEdgeScannerTest]'s own
+ * multi-file fixtures already exercise, and the only scan scope that can see both a cross-module
+ * edge and a cross-module node's real declaration. An unresolvable route declaration is a hard
+ * failure (see `EntryRegistrations.kt`'s `resolveDeclaration`/`toNavNode`).
  *
  * All input file collections may legitimately be empty for a given graph module (e.g. one that
  * hasn't applied the screenshot-testing plugin, so has no screenshot index or baselines) — that's
@@ -66,7 +68,9 @@ import java.util.Base64
  * Deterministic given its declared inputs, so cacheable like `GenerateScreenshotPreviewTests`.
  */
 @CacheableTask
-abstract class GenerateDebugNavGraphSite : DefaultTask() {
+abstract class GenerateDebugNavGraphSite @Inject constructor(
+    private val workerExecutor: WorkerExecutor,
+) : DefaultTask() {
     @get:InputFiles
     @get:PathSensitive(PathSensitivity.RELATIVE)
     abstract val edgeSourceFiles: ConfigurableFileCollection
@@ -105,24 +109,32 @@ abstract class GenerateDebugNavGraphSite : DefaultTask() {
     @get:OutputDirectory
     abstract val outputDirectory: DirectoryProperty
 
+    /**
+     * Isolated classpath [NavGraphScanWorkAction] runs on — this task's own compile classpath
+     * deliberately doesn't include `KotlinPsiParser`/`NavNodeScanner`/`NavEdgeScanner` at runtime
+     * (see `ComposePreviewToolkitNavGraphPlugin`'s kdoc), so this has to be supplied explicitly.
+     */
+    @get:Classpath
+    abstract val navGraphScanWorkerClasspath: ConfigurableFileCollection
+
     @TaskAction
     fun generate() {
-        val (nodes, scannedEdgeResult) = KotlinPsiParser().use { parser ->
-            val ktFiles = edgeSourceFiles.files
-                .filter { it.isFile }
-                .map { file -> parser.parse(file) }
-            val nodes = NavNodeScanner(entryFunctionNames = entryFunctionNames.get())
-                .scan(ktFiles, fallbackBaseDirectory = projectDirectory.get().asFile)
-            val edgeResult = NavEdgeScanner(
-                entryFunctionNames = entryFunctionNames.get(),
-                navigateCallNames = navigateCallNames.get(),
-                callGraphResolutionDepth = callGraphResolutionDepth.get(),
-            ).scan(ktFiles)
-            nodes to edgeResult
+        val scanResultFile = temporaryDir.resolve("navGraphScanResult.bin")
+        val workQueue = workerExecutor.classLoaderIsolation { spec ->
+            spec.classpath.from(navGraphScanWorkerClasspath)
         }
-        scannedEdgeResult.warnings.forEach { warning -> logger.warn("nav-graph edge scan: $warning") }
+        workQueue.submit(NavGraphScanWorkAction::class.java) { params ->
+            params.sourceFiles.from(edgeSourceFiles)
+            params.entryFunctionNames.set(entryFunctionNames)
+            params.navigateCallNames.set(navigateCallNames)
+            params.callGraphResolutionDepth.set(callGraphResolutionDepth)
+            params.fallbackBaseDirectory.set(projectDirectory)
+            params.outputFile.set(scanResultFile)
+        }
+        workQueue.await()
 
-        val edges = scannedEdgeResult.edges.distinct()
+        val (nodes, edges, warnings) = readNavGraphScanResult(scanResultFile)
+        warnings.forEach { warning -> logger.warn("nav-graph edge scan: $warning") }
 
         val screenshotEntries =
             screenshotIndexFiles.files

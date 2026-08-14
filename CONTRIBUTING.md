@@ -2,7 +2,7 @@
 
 ## Local development
 
-`annotations`, `ksp-processor`, `gradle-plugin`, `nav-graph-psi-analyzer`, and
+`annotations`, `ksp-processor`, `gradle-plugin`, `nav-graph-model`, `nav-graph-psi-analyzer`, and
 `nav-graph-gradle-plugin` are a normal multi-project Gradle build at the repo root. `sample/` is a
 **separate** Gradle build (its own `settings.gradle.kts`/`gradlew`) that applies the plugins
 exactly like a real consumer would — see the comment at the top of `sample/settings.gradle.kts`
@@ -11,7 +11,7 @@ it can build at all:
 
 ```
 ./gradlew :annotations:publishToMavenLocal :ksp-processor:publishToMavenLocal :gradle-plugin:publishToMavenLocal \
-          :nav-graph-psi-analyzer:publishToMavenLocal :nav-graph-gradle-plugin:publishToMavenLocal
+          :nav-graph-model:publishToMavenLocal :nav-graph-psi-analyzer:publishToMavenLocal :nav-graph-gradle-plugin:publishToMavenLocal
 cd sample
 ./gradlew updateDebugScreenshotTest
 ./gradlew validateDebugScreenshotTest
@@ -19,7 +19,8 @@ cd sample
 ```
 
 Re-run the `publishToMavenLocal` step after any change to `annotations`, `ksp-processor`,
-`gradle-plugin`, `nav-graph-psi-analyzer`, or `nav-graph-gradle-plugin` to pick it up in `sample`.
+`gradle-plugin`, `nav-graph-model`, `nav-graph-psi-analyzer`, or `nav-graph-gradle-plugin` to pick
+it up in `sample`.
 
 `sample/` is itself multi-module: `sample/app` (Nav3 host, applies both the screenshot-test and
 navgraph plugins), `sample/feature-a`, and `sample/feature-b` (navgraph plugin only — see
@@ -29,7 +30,7 @@ together (see README.md's "Gallery site" subsection).
 
 ## Opening a PR
 
-`ci.yml` runs on every PR: it builds `annotations`/`ksp-processor`/`gradle-plugin`/
+`ci.yml` runs on every PR: it builds `annotations`/`ksp-processor`/`gradle-plugin`/`nav-graph-model`/
 `nav-graph-psi-analyzer`/`nav-graph-gradle-plugin`, publishes them to `mavenLocal`, then dogfoods
 both composite actions against `sample/` — so a broken plugin/processor change or a broken
 `action.yml` both surface directly in the PR's checks. First, `update-validate-screenshot-tests`

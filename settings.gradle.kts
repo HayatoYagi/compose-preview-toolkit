@@ -21,6 +21,7 @@ rootProject.name = "compose-preview-toolkit"
 include(":annotations")
 include(":ksp-processor")
 include(":gradle-plugin")
+include(":nav-graph-model")
 include(":nav-graph-psi-analyzer")
 include(":nav-graph-gradle-plugin")
 

@@ -31,16 +31,9 @@ ksp-symbol-processing-api = { module = "com.google.devtools.ksp:symbol-processin
 # Used by nav-graph-psi-analyzer, a plain JVM library with no Gradle-API dependency, which exposes
 # it via api(...) because its public API (KotlinPsiParser/NavNodeScanner) returns
 # KtFile/KtCallExpression types straight from it — the exposure is load-bearing, not accidental.
-# That in turn puts it on the compile classpath of nav-graph-gradle-plugin and, transitively, any
-# consumer applying the `io.github.hayatoyagi.compose-preview-toolkit.navgraph` plugin, which
-# triggers Kotlin's "'kotlin-compiler-embeddable' Artifact Present in Build Classpath ... along
-# Kotlin Gradle plugin" warning (https://kotl.in/gradle/internal-compiler-symbols) at configuration
-# time. The warning is harmless in practice — `compileDebugKotlin`/`assembleDebug` succeed with no
-# observed miscompilation — but isn't eliminated: doing so would require classloader isolation or
-# shading kotlin-compiler-embeddable under a private package, which the KtFile/KtCallExpression
-# return types on nav-graph-psi-analyzer's public API make nontrivial. See
-# nav-graph-gradle-plugin's build.gradle.kts dependencies block for the same note at the actual
-# collision site.
+# nav-graph-gradle-plugin only depends on nav-graph-psi-analyzer via compileOnly, resolving it
+# fresh into an isolated Gradle Worker classpath at task-execution time instead — see
+# ComposePreviewToolkitNavGraphPlugin's kdoc — so this never lands on a consumer's own classpath.
 kotlin-compiler-embeddable = { module = "org.jetbrains.kotlin:kotlin-compiler-embeddable", version.ref = "kotlin" }
 junit-jupiter = { module = "org.junit.jupiter:junit-jupiter", version.ref = "junit" }
 

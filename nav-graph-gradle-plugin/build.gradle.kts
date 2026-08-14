@@ -8,6 +8,36 @@ kotlin {
     jvmToolchain(17)
 }
 
+// Embeds this module's own release version into a generated Kotlin constant, so the plugin can
+// resolve the correct published `compose-preview-toolkit-nav-graph-psi-analyzer` coordinate at
+// apply-time without hand-syncing version numbers in two places — same mechanism as
+// gradle-plugin's own generatePluginVersion, needed here for the same reason: see the
+// nav-graph-psi-analyzer dependency comment below.
+val generatedVersionDir = layout.buildDirectory.dir("generated/pluginVersion/kotlin")
+
+val generatePluginVersion by tasks.registering {
+    val outputDir = generatedVersionDir
+    val versionValue = project.version.toString()
+    outputs.dir(outputDir)
+    doLast {
+        val file = outputDir.get().asFile
+            .resolve("io/github/hayatoyagi/composepreviewtoolkit/gradle/PluginVersion.kt")
+        file.parentFile.mkdirs()
+        file.writeText(
+            """
+            package io.github.hayatoyagi.composepreviewtoolkit.gradle
+
+            internal const val PLUGIN_VERSION = "$versionValue"
+
+            """.trimIndent() + "\n",
+        )
+    }
+}
+
+kotlin.sourceSets.main {
+    kotlin.srcDir(generatePluginVersion)
+}
+
 gradlePlugin {
     website.set("https://github.com/HayatoYagi/compose-preview-toolkit")
     vcsUrl.set("https://github.com/HayatoYagi/compose-preview-toolkit")
@@ -25,25 +55,12 @@ gradlePlugin {
 }
 
 dependencies {
-    // A plain project dependency, not a version-embedded runtime-fetched artifact like the
-    // ksp-processor module: nav-graph-psi-analyzer's KtFile/NavNodeScanner classes are used directly
-    // inside this plugin's own task action code (GenerateDebugNavGraph), not applied to a
-    // *consumer's* buildscript classpath by coordinate string at apply-time the way the KSP
-    // processor is. So there's no need for this module's own generatePluginVersion-style
-    // PLUGIN_VERSION embedding trick — implementation(project(...)) is enough.
-    //
-    // KNOWN LIMITATION: this transitively pulls in kotlin-compiler-embeddable (nav-graph-psi-
-    // analyzer exposes it via api(...), since its public API returns KtFile/KtCallExpression
-    // types from it), which becomes part of the classpath of any consumer applying this plugin.
-    // Building compose-preview-toolkit-sample's :app/:feature-a/:feature-b (which apply this
-    // plugin alongside AGP's built-in Kotlin support) confirms Kotlin's Gradle plugin emits a
-    // "'kotlin-compiler-embeddable' Artifact Present in Build Classpath ... along Kotlin Gradle
-    // plugin" warning (https://kotl.in/gradle/internal-compiler-symbols) at configuration time.
-    // Real compilation (compileDebugKotlin) still succeeds — no miscompilation observed — so this
-    // is accepted as a warning-only known limitation rather than attempting classloader
-    // isolation/shading, which is a materially larger task. See the matching note on
-    // kotlin-compiler-embeddable in the root gradle/libs.versions.toml.
-    implementation(project(":nav-graph-psi-analyzer"))
+    // compileOnly, not implementation: KotlinPsiParser/NavNodeScanner/NavEdgeScanner (and their
+    // kotlin-compiler-embeddable dependency) are only ever used inside NavGraphScanWorkAction,
+    // which runs in a Gradle Worker with an isolated classloader.
+    compileOnly(project(":nav-graph-psi-analyzer"))
+
+    implementation(project(":nav-graph-model"))
 
     // Compile-time dependency purely to reuse ScreenshotPreviewProcessorProvider.DEFAULT_INDEX_FILE_NAME
     // (the "ComposePreviewToolkitScreenshotIndex" base name) when globbing a graph module's KSP

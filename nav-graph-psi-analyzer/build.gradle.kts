@@ -8,6 +8,8 @@ kotlin {
 }
 
 dependencies {
+    api(project(":nav-graph-model"))
+
     // api, not implementation: KtFile/KtCallExpression/etc from this artifact are part of this
     // module's own public API surface (NavNodeScanner takes/returns them), so consumers need
     // them on their compile classpath too.

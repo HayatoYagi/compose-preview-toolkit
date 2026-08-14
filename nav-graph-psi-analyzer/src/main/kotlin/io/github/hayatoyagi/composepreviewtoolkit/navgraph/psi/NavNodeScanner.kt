@@ -3,9 +3,6 @@ package io.github.hayatoyagi.composepreviewtoolkit.navgraph.psi
 import org.jetbrains.kotlin.psi.KtFile
 import java.io.File
 
-/** Default value for [NavNodeScanner]'s `entryFunctionNames`, matching Nav3's own `entry<T> {}`. */
-val DEFAULT_ENTRY_FUNCTION_NAMES = setOf("entry")
-
 /**
  * Scans a set of already-parsed [KtFile]s for Navigation3 route registrations shaped like
  * `entry<Route> { ... }`, and produces one [NavNode] per unique route found.
