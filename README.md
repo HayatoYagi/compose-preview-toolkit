@@ -163,15 +163,12 @@ plugins {
 ./gradlew generateDebugNavGraph
 ```
 
-Edge detection handles two navigation-wiring shapes with one algorithm: a callback threaded through
-intermediate composables before finally being invoked far from where it's declared (e.g. a feature
-module's `onProceedClick`, only actually invoked at an app-level `NavHost`'s call site), and a
-direct `navigateTo(...)` call with no callback indirection. Analysis is best-effort and name-based,
-not type resolution: ambiguous callee names and calls beyond the configured depth are dropped with
-a warning rather than guessed, and there's no escape-hatch annotation for gaps — if the scanner
-misses something real, the scanner should improve rather than asking you to annotate your
-navigation code. Configure via `composePreviewToolkitNavGraph { ... }`'s `entryFunctionNames`,
-`navigateCallNames`, and `callGraphResolutionDepth`.
+Edge detection is best-effort and name-based, not type resolution: ambiguous callee names and calls
+beyond the configured depth are dropped with a warning rather than guessed, and there's no
+escape-hatch annotation for gaps — if the scanner misses something real, the scanner should improve
+rather than asking you to annotate your navigation code. Configure via
+`composePreviewToolkitNavGraph { ... }`'s `entryFunctionNames`, `navigateCallNames`, and
+`callGraphResolutionDepth`.
 
 ### Gallery site (nodes + edges + screenshots)
 
