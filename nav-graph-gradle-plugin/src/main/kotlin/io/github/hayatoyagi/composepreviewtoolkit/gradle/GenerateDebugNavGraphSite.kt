@@ -25,8 +25,9 @@ import java.util.Base64
  * ([screenshotIndexFiles]/[screenshotReferenceImages]) — written by each `graphModules` project's
  * own `generateDebugNavGraph` task / the screenshot-testing plugin's KSP processor — across every
  * project configured via `composePreviewToolkitNavGraph { graphModules.set(...) }`, then renders a
- * single self-contained `index.html` with both a Mermaid.js nav graph diagram and a thumbnail
- * gallery ([buildGallerySiteHtml]).
+ * single self-contained `index.html`: a Mermaid.js nav graph diagram whose nodes each embed their
+ * own representative screenshot thumbnail, clickable to reveal every screenshot matched to that
+ * route ([buildGallerySiteHtml]).
  *
  * ## Why edges are (re-)scanned here rather than purely aggregated from [edgeIndexFiles]
  *
@@ -139,25 +140,29 @@ abstract class GenerateDebugNavGraphSite : DefaultTask() {
             suffixesToStrip = routeNameSuffixesToStrip.get(),
         )
 
-        val cards = entries.map { entry ->
-            GalleryCard(
+        // entries is already deduplicated by qualifiedName and sorted (see buildGalleryEntries),
+        // which is exactly the deterministic node ordering buildMermaidGraph/buildGallerySiteHtml
+        // need so their independently-derived positional node ids (n0, n1, ...) agree with each
+        // other and don't shuffle between otherwise-identical runs. Both the graph and the
+        // click-to-reveal modal data are therefore driven off this one same-ordered node list.
+        val galleryNodes = entries.map { entry ->
+            GalleryNode(
                 qualifiedName = entry.node.qualifiedName,
                 simpleName = entry.node.simpleName,
-                thumbnailDataUri = entry.thumbnail?.let { file ->
-                    "data:image/png;base64," + Base64.getEncoder().encodeToString(file.readBytes())
+                thumbnails = entry.thumbnails.map { file ->
+                    GalleryThumbnail(
+                        label = file.name,
+                        dataUri = "data:image/png;base64," + Base64.getEncoder().encodeToString(file.readBytes()),
+                    )
                 },
             )
         }
 
-        // entries.map { it.node } is already deduplicated by qualifiedName and sorted (see
-        // buildGalleryEntries), which is exactly the deterministic node ordering buildMermaidGraph
-        // needs so its positional node ids (n0, n1, ...) don't shuffle between otherwise-identical
-        // runs. Both the graph and the gallery are therefore driven off the same node list.
-        val mermaidGraph = buildMermaidGraph(nodes = entries.map { it.node }, edges = edges)
+        val mermaidGraph = buildMermaidGraph(nodes = galleryNodes, edges = edges)
 
         val outputDir = outputDirectory.get().asFile
         outputDir.deleteRecursively()
         outputDir.mkdirs()
-        outputDir.resolve("index.html").writeText(buildGallerySiteHtml(cards, mermaidGraph))
+        outputDir.resolve("index.html").writeText(buildGallerySiteHtml(galleryNodes, mermaidGraph))
     }
 }
