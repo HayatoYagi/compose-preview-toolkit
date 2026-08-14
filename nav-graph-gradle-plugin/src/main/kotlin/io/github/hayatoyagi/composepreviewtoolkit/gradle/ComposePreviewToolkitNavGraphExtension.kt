@@ -9,6 +9,16 @@ import org.gradle.api.provider.SetProperty
  * Registered under a name distinct from the screenshot-testing plugin's `composePreviewToolkit`
  * extension so a module can apply both plugins at once (e.g. a feature module using both
  * screenshot-test generation and nav-graph extraction) without a naming collision.
+ *
+ * Notably absent: a `graphModules` property. `generateDebugNavGraphSite` (registered on whichever
+ * module applies this plugin, typically the app/aggregator module) always aggregates across this
+ * project's own path plus every project dependency resolvable from its `debugCompileClasspath`
+ * configuration, transitively — computed automatically by
+ * `ComposePreviewToolkitNavGraphPlugin.discoverGraphModules`, with no manual override. A
+ * hand-maintained module list is exactly what let a route's owning module go unlisted in a real
+ * consumer, silently producing a wrong `qualifiedName` for that route; over-including an unrelated
+ * dependency module with no nav entries is harmless (it just contributes nothing), so there's no
+ * safe way to under-specify this that's worth exposing as a knob.
  */
 abstract class ComposePreviewToolkitNavGraphExtension {
     /**
@@ -33,16 +43,6 @@ abstract class ComposePreviewToolkitNavGraphExtension {
      * `nav-graph-psi-analyzer`'s `DEFAULT_CALL_GRAPH_RESOLUTION_DEPTH`.
      */
     abstract val callGraphResolutionDepth: Property<Int>
-
-    /**
-     * Gradle project paths (e.g. `[":feature-a", ":feature-b", ":app"]`) that
-     * `generateDebugNavGraphSite` aggregates node/screenshot indexes across. Only meaningful on
-     * the "aggregator" module (typically the app module) where the site-generation task is
-     * registered; on other modules this property is simply unused. Deliberately has no
-     * convention default: there's no sensible universal default for "which modules make up my
-     * app's graph" — every consumer must set this explicitly.
-     */
-    abstract val graphModules: SetProperty<String>
 
     /**
      * Suffixes stripped from a route's `simpleName` (case-sensitive, first matching suffix in

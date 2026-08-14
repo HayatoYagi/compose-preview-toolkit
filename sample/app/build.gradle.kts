@@ -44,11 +44,10 @@ composePreviewToolkit {
 }
 
 // `app` is the "aggregator" module: it's the one that actually wires FeatureARoute/FeatureBRoute
-// into its own NavDisplay (see AppNavHost.kt), so it's the natural place to aggregate node +
-// screenshot indexes across the whole app's graph and generate the gallery site.
-composePreviewToolkitNavGraph {
-    graphModules.set(setOf(":app", ":feature-a", ":feature-b"))
-}
+// into its own NavDisplay (see AppNavHost.kt), so it's the natural place to generate the gallery
+// site. No graphModules configuration needed here — it's discovered automatically from this
+// module's own resolved dependency graph (:app itself plus :feature-a/:feature-b below), see
+// ComposePreviewToolkitNavGraphPlugin.discoverGraphModules.
 
 dependencies {
     implementation(project(":feature-a"))

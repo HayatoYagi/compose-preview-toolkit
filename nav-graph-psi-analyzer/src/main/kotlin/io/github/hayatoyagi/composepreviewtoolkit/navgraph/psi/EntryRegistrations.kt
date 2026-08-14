@@ -71,19 +71,10 @@ private fun KtCallExpression.toNavNode(
 
     val simpleName = writtenChain.last()
     val resolved = resolveDeclaration(writtenChain, declarationsBySimpleName)
+        ?: throw IllegalStateException(unresolvedDeclarationMessage(writtenChain, fallbackBaseDirectory))
 
-    val qualifiedName =
-        if (resolved != null) {
-            val packageName = resolved.containingKtFile.packageFqName.asString()
-            val actualChain = resolved.outerToInnerNameChain()
-            joinQualifiedName(packageName, actualChain)
-        } else {
-            // Best-effort fallback when the route's declaration isn't among the scanned files
-            // (e.g. it lives in a dependency module not passed into this scan): assume it's
-            // declared in the same package as the call site and use the chain as written.
-            val packageName = containingKtFile.packageFqName.asString()
-            joinQualifiedName(packageName, writtenChain)
-        }
+    val packageName = resolved.containingKtFile.packageFqName.asString()
+    val qualifiedName = joinQualifiedName(packageName, resolved.outerToInnerNameChain())
 
     // The route's own declaration site (resolved above) is deliberately NOT where this points —
     // per this feature's design, the useful link for a reviewer is the entry<X> {} registration
@@ -92,14 +83,37 @@ private fun KtCallExpression.toNavNode(
     val location = locateCallSite(this, fallbackBaseDirectory)
 
     return NavNode(
-        packageName = resolved?.containingKtFile?.packageFqName?.asString()
-            ?: containingKtFile.packageFqName.asString(),
+        packageName = packageName,
         simpleName = simpleName,
         qualifiedName = qualifiedName,
         filePath = location.filePath,
         line = location.line,
         filePathIsRepoRelative = location.filePathIsRepoRelative,
     )
+}
+
+/**
+ * There's deliberately no best-effort fallback here (e.g. guessing the route shares the call
+ * site's package) for a route whose declaration can't be found among [files][findEntryRegistrations]
+ * scanned: a wrong-but-plausible guess is worse than a loud failure for something this checkable —
+ * matches this toolkit's stated philosophy of failing when the scanner can't determine something
+ * real rather than silently producing a misleading result. In practice this should be rare: a
+ * caller with proper scan scope (e.g. `nav-graph-gradle-plugin`'s `generateDebugNavGraphSite`,
+ * whose scan automatically covers the full resolved project-dependency graph) will always have
+ * the declaration in view unless the route type genuinely comes from outside that graph — a real
+ * configuration problem worth surfacing, not papering over.
+ */
+private fun KtCallExpression.unresolvedDeclarationMessage(
+    writtenChain: List<String>,
+    fallbackBaseDirectory: File,
+): String {
+    val location = locateCallSite(this, fallbackBaseDirectory)
+    val routeName = writtenChain.joinToString(".")
+    return "compose-preview-toolkit nav-graph: could not resolve the declaration of route \"$routeName\" " +
+        "registered via entry<$routeName> { ... } at ${location.filePath}:${location.line}. Its declaration " +
+        "wasn't found among the scanned Kotlin sources. If it's declared in a different Gradle module, make " +
+        "sure that module is actually reachable from this scan (a project dependency of whatever module is " +
+        "being scanned) — this is otherwise unrecoverable rather than guessed at."
 }
 
 /** Finds the [KtClassOrObject] whose outer-to-inner name chain ends with [writtenChain]. */

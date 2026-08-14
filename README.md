@@ -173,30 +173,31 @@ rather than asking you to annotate your navigation code. Configure via
 ### Gallery site (nodes + edges + screenshots)
 
 On an "aggregator" module (typically your app module, the one that actually wires every feature's
-routes into its own `NavDisplay`), configure `graphModules` with every project path that
-contributes to the graph, then run `generateDebugNavGraphSite`:
-
-```kotlin
-// app module's build.gradle.kts
-composePreviewToolkitNavGraph {
-    graphModules.set(setOf(":app", ":feature-a", ":feature-b"))
-}
-```
+routes into its own `NavDisplay`), just run `generateDebugNavGraphSite`:
 
 ```
 ./gradlew :app:generateDebugNavGraphSite
 ```
 
+There's nothing to configure: the set of projects it scans is discovered automatically from the
+aggregator's own resolved `debugCompileClasspath` (transitively, so every module it depends on —
+directly or indirectly — is included), plus the aggregator itself. This is deliberate: a
+hand-maintained module list is exactly what let a route's owning module go unlisted in a real
+consumer, silently producing a wrong `qualifiedName` for that route. Over-including a dependency
+module with no nav entries at all is harmless — it just contributes nothing to the graph.
+
 This task:
 
-- Aggregates each `graphModules` project's node index, plus (for projects also applying the
-  `io.github.hayatoyagi.compose-preview-toolkit` plugin) their screenshot index and reference
-  baselines — via real Gradle cross-project task dependencies, so running the aggregator's task
-  alone triggers every graph module's own `generateDebugNavGraph`/`kspDebugKotlin` first.
-- Re-scans edges project-wide across every `graphModules` project's raw sources, rather than
-  purely aggregating each module's own edge index — a route's `entry { ... }` registration and the
-  `navigateTo(...)` call that reaches it often live in different modules, which a single-module
-  scan can't resolve.
+- Runs one project-wide PSI scan across every discovered project's raw `.kt` sources to find both
+  nodes and edges together, rather than aggregating each module's own precomputed index — a
+  route's `entry { ... }` registration, its declaration, and the `navigateTo(...)` call that
+  reaches it often all live in different modules, which a single-module scan can't resolve. A
+  route whose declaration genuinely can't be found anywhere in that scan is a hard build failure
+  (naming the route and its `entry<X> { ... }` call site), not a silently wrong guess.
+- Also aggregates each discovered project's screenshot index and reference baselines (for
+  projects also applying the `io.github.hayatoyagi.compose-preview-toolkit` plugin) — via a real
+  Gradle cross-project task dependency, so running the aggregator's task alone triggers every
+  graph module's own `kspDebugKotlin` first.
 - Pairs each node with a screenshot thumbnail by a best-effort naming heuristic: strip a
   configurable suffix (`routeNameSuffixesToStrip`, default `["Destination", "Route"]`) from the
   route's simple name, then case-insensitively substring-match the remainder against the
