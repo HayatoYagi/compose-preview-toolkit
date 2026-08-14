@@ -228,9 +228,7 @@ applying the plugin(s) exactly like a real consumer would.
 demonstrating the nav-graph plugin's node extraction and gallery site generation (see "Nav Graph"
 above) alongside the screenshot-test plugin. All three modules apply the screenshot-test plugin, so
 every route gets a real thumbnail in the generated gallery; only `sample/app` applies the nav-graph
-plugin, demonstrating "apply once, on the aggregator only" (see "Nav Graph" above). `sample/`'s own
-root `build.gradle.kts` declares every plugin used anywhere in the sample build with `apply false`,
-which is what keeps that topology safe from the classloader-mismatch pitfall described there.
+plugin, demonstrating "apply once, on the aggregator only" (see "Nav Graph" above).
 
 The sample also demonstrates both edge-detection shapes: `feature-a`'s `onProceedClick`, written at
 the app level and passed in as a callback (`AppNavHost.kt`/`FeatureANavEntries.kt`), and
