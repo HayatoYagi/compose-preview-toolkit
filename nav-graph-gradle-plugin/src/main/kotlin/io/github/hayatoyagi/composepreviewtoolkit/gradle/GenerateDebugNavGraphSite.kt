@@ -140,6 +140,13 @@ abstract class GenerateDebugNavGraphSite : DefaultTask() {
             suffixesToStrip = routeNameSuffixesToStrip.get(),
         )
 
+        // Both auto-populated by GitHub Actions, both absent for a local ./gradlew run — read here
+        // (the task's own I/O boundary) rather than in NavGraphSite.kt, matching this codebase's
+        // existing split of "pure/testable HTML generation" (NavGraphSite.kt) from "env/file reads"
+        // (this task). See buildSourceLink's kdoc for the full gating logic.
+        val githubRepository = System.getenv("GITHUB_REPOSITORY")
+        val githubSha = System.getenv("GITHUB_SHA")
+
         // entries is already deduplicated by qualifiedName and sorted (see buildGalleryEntries),
         // which is exactly the deterministic node ordering buildMermaidGraph/buildGallerySiteHtml
         // need so their independently-derived positional node ids (n0, n1, ...) agree with each
@@ -155,6 +162,9 @@ abstract class GenerateDebugNavGraphSite : DefaultTask() {
                         dataUri = "data:image/png;base64," + Base64.getEncoder().encodeToString(file.readBytes()),
                     )
                 },
+                filePath = entry.node.filePath,
+                line = entry.node.line,
+                sourceUrl = buildSourceLink(entry.node, githubRepository, githubSha),
             )
         }
 

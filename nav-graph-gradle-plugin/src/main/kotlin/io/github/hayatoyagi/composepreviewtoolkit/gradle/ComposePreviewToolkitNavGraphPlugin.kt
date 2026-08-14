@@ -51,6 +51,7 @@ class ComposePreviewToolkitNavGraphPlugin : Plugin<Project> {
             task.entryFunctionNames.set(extension.entryFunctionNames)
             task.navigateCallNames.set(extension.navigateCallNames)
             task.callGraphResolutionDepth.set(extension.callGraphResolutionDepth)
+            task.projectDirectory.set(target.layout.projectDirectory)
             task.outputFile.set(
                 target.layout.buildDirectory.file(
                     "generated/composePreviewToolkit/navGraph/debug/$NAV_NODE_INDEX_FILE_NAME.txt",

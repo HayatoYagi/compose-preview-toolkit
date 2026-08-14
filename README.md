@@ -166,7 +166,11 @@ plugins {
 Writes, under `build/generated/composePreviewToolkit/navGraph/debug/` (scoped to that module's own
 sources):
 
-- `ComposePreviewToolkitNavNodeIndex.txt` — tab-separated `packageName\tsimpleName\tqualifiedName`
+- `ComposePreviewToolkitNavNodeIndex.txt` — tab-separated
+  `packageName\tsimpleName\tqualifiedName\tfilePath\tline\tfilePathIsRepoRelative`, where
+  `filePath`/`line` locate the route's `entry<X> { ... }` registration call site (not the bare
+  route declaration), and `filePathIsRepoRelative` says whether `filePath` is relative to the git
+  repository root (vs. some best-effort fallback base directory)
 - `ComposePreviewToolkitNavEdgeIndex.txt` — tab-separated `sourceRouteQualifiedName\ttargetRouteQualifiedName`
 
 Edge detection handles two navigation-wiring shapes with one algorithm: a callback threaded through
@@ -215,7 +219,11 @@ This task:
 Output is a single self-contained `build/composePreviewToolkit/navGraphSite/debug/index.html`: a
 Mermaid.js graph diagram of every node and detected edge (Mermaid loaded from a CDN at page-load
 time — affects only the viewer's browser, not build reproducibility), plus a thumbnail gallery
-(thumbnails embedded as base64 data URIs). See "Sample App" below for a worked example.
+(thumbnails embedded as base64 data URIs). Clicking a node's modal also shows its `entry<X> { ... }`
+registration's `filePath:line`; when `GITHUB_REPOSITORY`/`GITHUB_SHA` are both set (as GitHub
+Actions does automatically) and that node's path is git-root-relative, it's rendered as a clickable
+link to that exact line on GitHub — otherwise it's shown as plain, non-interactive text. See
+"Sample App" below for a worked example.
 
 ### Composite GitHub Action
 

@@ -6,6 +6,7 @@ import org.jetbrains.kotlin.psi.KtClassOrObject
 import org.jetbrains.kotlin.psi.KtFile
 import org.jetbrains.kotlin.psi.KtNameReferenceExpression
 import org.jetbrains.kotlin.psi.KtUserType
+import java.io.File
 
 /**
  * One `entry<X> { ... }` registration found while scanning a project's [KtFile]s: [node] is
@@ -28,6 +29,7 @@ internal data class EntryRegistration(
 internal fun findEntryRegistrations(
     files: List<KtFile>,
     entryFunctionNames: Set<String>,
+    fallbackBaseDirectory: File = File("."),
 ): List<EntryRegistration> {
     val declarationsBySimpleName: Map<String, List<KtClassOrObject>> =
         files
@@ -41,7 +43,7 @@ internal fun findEntryRegistrations(
         PsiTreeUtil.findChildrenOfType(file, KtCallExpression::class.java)
             .filter { it.isEntryRegistration(entryFunctionNames) }
             .forEach { call ->
-                val node = call.toNavNode(declarationsBySimpleName)
+                val node = call.toNavNode(declarationsBySimpleName, fallbackBaseDirectory)
                 if (node != null) {
                     registrations.add(EntryRegistration(node, call))
                 }
@@ -59,7 +61,10 @@ private fun KtCallExpression.isEntryRegistration(entryFunctionNames: Set<String>
         lambdaArguments.isNotEmpty()
 }
 
-private fun KtCallExpression.toNavNode(declarationsBySimpleName: Map<String, List<KtClassOrObject>>): NavNode? {
+private fun KtCallExpression.toNavNode(
+    declarationsBySimpleName: Map<String, List<KtClassOrObject>>,
+    fallbackBaseDirectory: File,
+): NavNode? {
     val typeReference = typeArgumentList?.arguments?.singleOrNull()?.typeReference ?: return null
     val writtenChain = typeReference.typeElement.userTypeChain()
     if (writtenChain.isEmpty()) return null
@@ -80,11 +85,20 @@ private fun KtCallExpression.toNavNode(declarationsBySimpleName: Map<String, Lis
             joinQualifiedName(packageName, writtenChain)
         }
 
+    // The route's own declaration site (resolved above) is deliberately NOT where this points —
+    // per this feature's design, the useful link for a reviewer is the entry<X> {} registration
+    // call site itself (this KtCallExpression, i.e. where the screen composable is actually
+    // invoked), not the bare class/object declaration.
+    val location = locateCallSite(this, fallbackBaseDirectory)
+
     return NavNode(
         packageName = resolved?.containingKtFile?.packageFqName?.asString()
             ?: containingKtFile.packageFqName.asString(),
         simpleName = simpleName,
         qualifiedName = qualifiedName,
+        filePath = location.filePath,
+        line = location.line,
+        filePathIsRepoRelative = location.filePathIsRepoRelative,
     )
 }
 

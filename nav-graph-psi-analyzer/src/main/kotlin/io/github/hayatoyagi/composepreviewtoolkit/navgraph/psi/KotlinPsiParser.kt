@@ -51,8 +51,14 @@ class KotlinPsiParser : AutoCloseable {
         sourceText: String,
     ): KtFile = psiFileFactory.createFileFromText(fileName, KotlinLanguage.INSTANCE, sourceText) as KtFile
 
-    /** Parses a real `.kt` file on disk, using its file name to name the resulting [KtFile]. */
-    fun parse(file: File): KtFile = parse(file.name, file.readText())
+    /**
+     * Parses a real `.kt` file on disk, using its *absolute* path (not just its bare file name)
+     * to name the resulting [KtFile] — [findEntryRegistrations]'s call-site source-location
+     * computation relativizes this absolute path against the git repository root (or a fallback
+     * base directory) to build [NavNode.filePath], so the directory information has to survive
+     * into the parsed [KtFile] and not just the leaf file name.
+     */
+    fun parse(file: File): KtFile = parse(file.absolutePath, file.readText())
 
     /**
      * Releases the underlying PSI/compiler-frontend resources. Must be called exactly once, after

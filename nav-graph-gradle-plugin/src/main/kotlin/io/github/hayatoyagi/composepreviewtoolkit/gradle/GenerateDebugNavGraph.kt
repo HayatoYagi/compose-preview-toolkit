@@ -7,12 +7,14 @@ import io.github.hayatoyagi.composepreviewtoolkit.navgraph.psi.writeNavEdgeIndex
 import io.github.hayatoyagi.composepreviewtoolkit.navgraph.psi.writeNavNodeIndex
 import org.gradle.api.DefaultTask
 import org.gradle.api.file.ConfigurableFileCollection
+import org.gradle.api.file.DirectoryProperty
 import org.gradle.api.file.RegularFileProperty
 import org.gradle.api.provider.Property
 import org.gradle.api.provider.SetProperty
 import org.gradle.api.tasks.CacheableTask
 import org.gradle.api.tasks.Input
 import org.gradle.api.tasks.InputFiles
+import org.gradle.api.tasks.Internal
 import org.gradle.api.tasks.OutputFile
 import org.gradle.api.tasks.PathSensitive
 import org.gradle.api.tasks.PathSensitivity
@@ -49,6 +51,19 @@ abstract class GenerateDebugNavGraph : DefaultTask() {
     @get:Input
     abstract val callGraphResolutionDepth: Property<Int>
 
+    /**
+     * Fallback base directory for [io.github.hayatoyagi.composepreviewtoolkit.navgraph.psi.NavNode.filePath]
+     * when the git repository root can't be determined (see `NavNodeScanner.scan`'s
+     * `fallbackBaseDirectory`) — normally this module's own project directory. Deliberately
+     * `@Internal`, not `@Input`/`@InputDirectory`: it's an absolute, machine-specific path, and
+     * baking that into this [CacheableTask]'s cache key would make the task needlessly
+     * cache-miss across machines/checkouts for what is, in the overwhelmingly common case (git
+     * available, which real CI/dev checkouts always are), a fallback that's never even
+     * consulted — see `EntryRegistrations.kt`'s `locateCallSite`.
+     */
+    @get:Internal
+    abstract val projectDirectory: DirectoryProperty
+
     @get:OutputFile
     abstract val outputFile: RegularFileProperty
 
@@ -66,7 +81,8 @@ abstract class GenerateDebugNavGraph : DefaultTask() {
             val ktFiles = sourceFiles.files
                 .filter { it.isFile }
                 .map { file -> parser.parse(file) }
-            val nodes = NavNodeScanner(entryFunctionNames = entryFunctionNames.get()).scan(ktFiles)
+            val nodes = NavNodeScanner(entryFunctionNames = entryFunctionNames.get())
+                .scan(ktFiles, fallbackBaseDirectory = projectDirectory.get().asFile)
             val edgeResult = NavEdgeScanner(
                 entryFunctionNames = entryFunctionNames.get(),
                 navigateCallNames = navigateCallNames.get(),

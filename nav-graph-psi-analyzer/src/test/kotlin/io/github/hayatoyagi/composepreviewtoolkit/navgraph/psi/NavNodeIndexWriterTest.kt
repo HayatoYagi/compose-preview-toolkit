@@ -10,26 +10,46 @@ class NavNodeIndexWriterTest {
     @Test
     fun `formatNavNodeIndex writes one tab-separated line per node`() {
         val nodes = listOf(
-            NavNode(packageName = "com.example.foo", simpleName = "FooRoute", qualifiedName = "com.example.foo.FooRoute"),
+            NavNode(
+                packageName = "com.example.foo",
+                simpleName = "FooRoute",
+                qualifiedName = "com.example.foo.FooRoute",
+                filePath = "feature-foo/src/main/kotlin/com/example/foo/FooEntries.kt",
+                line = 12,
+                filePathIsRepoRelative = true,
+            ),
             NavNode(
                 packageName = "com.example",
                 simpleName = "Detail",
                 qualifiedName = "com.example.ParentRoute.Detail",
+                filePath = "ParentEntries.kt",
+                line = 34,
+                filePathIsRepoRelative = false,
             ),
         )
 
         val formatted = formatNavNodeIndex(nodes)
 
         assertEquals(
-            "com.example.foo\tFooRoute\tcom.example.foo.FooRoute\n" +
-                "com.example\tDetail\tcom.example.ParentRoute.Detail\n",
+            "com.example.foo\tFooRoute\tcom.example.foo.FooRoute\t" +
+                "feature-foo/src/main/kotlin/com/example/foo/FooEntries.kt\t12\ttrue\n" +
+                "com.example\tDetail\tcom.example.ParentRoute.Detail\tParentEntries.kt\t34\tfalse\n",
             formatted,
         )
     }
 
     @Test
     fun `writeNavNodeIndex writes the same content to a Writer`() {
-        val nodes = listOf(NavNode("com.example", "FooRoute", "com.example.FooRoute"))
+        val nodes = listOf(
+            NavNode(
+                packageName = "com.example",
+                simpleName = "FooRoute",
+                qualifiedName = "com.example.FooRoute",
+                filePath = "FooEntries.kt",
+                line = 1,
+                filePathIsRepoRelative = true,
+            ),
+        )
         val writer = StringWriter()
 
         writeNavNodeIndex(nodes, writer)
@@ -40,11 +60,21 @@ class NavNodeIndexWriterTest {
     @Test
     fun `parseNavNodeIndex round-trips formatNavNodeIndex's output`() {
         val nodes = listOf(
-            NavNode(packageName = "com.example.foo", simpleName = "FooRoute", qualifiedName = "com.example.foo.FooRoute"),
+            NavNode(
+                packageName = "com.example.foo",
+                simpleName = "FooRoute",
+                qualifiedName = "com.example.foo.FooRoute",
+                filePath = "feature-foo/src/main/kotlin/com/example/foo/FooEntries.kt",
+                line = 12,
+                filePathIsRepoRelative = true,
+            ),
             NavNode(
                 packageName = "com.example",
                 simpleName = "Detail",
                 qualifiedName = "com.example.ParentRoute.Detail",
+                filePath = "ParentEntries.kt",
+                line = 34,
+                filePathIsRepoRelative = false,
             ),
         )
 
@@ -55,9 +85,23 @@ class NavNodeIndexWriterTest {
 
     @Test
     fun `parseNavNodeIndex skips blank lines`() {
-        val parsed = parseNavNodeIndex(StringReader("\ncom.example\tFooRoute\tcom.example.FooRoute\n\n"))
+        val parsed = parseNavNodeIndex(
+            StringReader("\ncom.example\tFooRoute\tcom.example.FooRoute\tFooEntries.kt\t5\ttrue\n\n"),
+        )
 
-        assertEquals(listOf(NavNode("com.example", "FooRoute", "com.example.FooRoute")), parsed)
+        assertEquals(
+            listOf(
+                NavNode(
+                    packageName = "com.example",
+                    simpleName = "FooRoute",
+                    qualifiedName = "com.example.FooRoute",
+                    filePath = "FooEntries.kt",
+                    line = 5,
+                    filePathIsRepoRelative = true,
+                ),
+            ),
+            parsed,
+        )
     }
 
     @Test

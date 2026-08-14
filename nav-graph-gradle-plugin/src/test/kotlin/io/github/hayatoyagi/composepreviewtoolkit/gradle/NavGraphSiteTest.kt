@@ -4,6 +4,7 @@ import io.github.hayatoyagi.composepreviewtoolkit.navgraph.psi.NavEdge
 import io.github.hayatoyagi.composepreviewtoolkit.navgraph.psi.NavNode
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
+import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import java.io.File
@@ -194,6 +195,104 @@ class NavGraphSiteTest {
         val entries = buildGalleryEntries(nodes, emptyList(), emptyList(), emptySet())
 
         assertEquals(listOf("com.example.ARoute", "com.example.BRoute"), entries.map { it.node.qualifiedName })
+    }
+
+    @Test
+    fun `buildSourceLink builds a GitHub blob URL when both env vars are present and the path is repo-relative`() {
+        val node = NavNode(
+            packageName = "com.example.featurea",
+            simpleName = "FeatureARoute",
+            qualifiedName = "com.example.featurea.FeatureARoute",
+            filePath = "feature-a/src/main/kotlin/com/example/featurea/FeatureAEntries.kt",
+            line = 42,
+            filePathIsRepoRelative = true,
+        )
+
+        val url = buildSourceLink(node, githubRepository = "HayatoYagi/compose-preview-toolkit", githubSha = "abc123")
+
+        assertEquals(
+            "https://github.com/HayatoYagi/compose-preview-toolkit/blob/abc123/" +
+                "feature-a/src/main/kotlin/com/example/featurea/FeatureAEntries.kt#L42",
+            url,
+        )
+    }
+
+    @Test
+    fun `buildSourceLink returns null when either env var is absent`() {
+        val node = NavNode(
+            packageName = "com.example",
+            simpleName = "HomeRoute",
+            qualifiedName = "com.example.HomeRoute",
+            filePath = "app/src/main/kotlin/com/example/HomeEntries.kt",
+            line = 7,
+            filePathIsRepoRelative = true,
+        )
+
+        assertNull(buildSourceLink(node, githubRepository = null, githubSha = "abc123"))
+        assertNull(buildSourceLink(node, githubRepository = "HayatoYagi/compose-preview-toolkit", githubSha = null))
+        assertNull(buildSourceLink(node, githubRepository = null, githubSha = null))
+    }
+
+    @Test
+    fun `buildSourceLink returns null when filePath is only a fallback, not git-root-relative, even with both env vars present`() {
+        val node = NavNode(
+            packageName = "com.example",
+            simpleName = "HomeRoute",
+            qualifiedName = "com.example.HomeRoute",
+            filePath = "HomeEntries.kt",
+            line = 7,
+            filePathIsRepoRelative = false,
+        )
+
+        assertNull(buildSourceLink(node, githubRepository = "HayatoYagi/compose-preview-toolkit", githubSha = "abc123"))
+    }
+
+    @Test
+    fun `buildGallerySiteHtml renders a clickable source-location link when a node has a sourceUrl`() {
+        val nodes = listOf(
+            GalleryNode(
+                qualifiedName = "com.example.HomeRoute",
+                simpleName = "HomeRoute",
+                thumbnails = emptyList(),
+                filePath = "app/src/main/kotlin/com/example/HomeEntries.kt",
+                line = 7,
+                sourceUrl = "https://github.com/HayatoYagi/compose-preview-toolkit/blob/abc123/app/src/main/kotlin/com/example/HomeEntries.kt#L7",
+            ),
+        )
+
+        val html = buildGallerySiteHtml(nodes, mermaidGraph = "graph TD;\n")
+
+        assertTrue(html.contains("\"filePath\":\"app/src/main/kotlin/com/example/HomeEntries.kt\""))
+        assertTrue(html.contains("\"line\":7"))
+        assertTrue(
+            html.contains(
+                "\"sourceUrl\":\"https://github.com/HayatoYagi/compose-preview-toolkit/blob/abc123/" +
+                    "app/src/main/kotlin/com/example/HomeEntries.kt#L7\"",
+            ),
+        )
+        // The modal renders an <a> when sourceUrl is present, opening in a new tab.
+        assertTrue(html.contains("link.target = \"_blank\""))
+        assertTrue(html.contains("link.rel = \"noopener\""))
+    }
+
+    @Test
+    fun `buildGallerySiteHtml renders source location as plain text (null sourceUrl) when no link could be built`() {
+        val nodes = listOf(
+            GalleryNode(
+                qualifiedName = "com.example.HomeRoute",
+                simpleName = "HomeRoute",
+                thumbnails = emptyList(),
+                filePath = "HomeEntries.kt",
+                line = 7,
+                sourceUrl = null,
+            ),
+        )
+
+        val html = buildGallerySiteHtml(nodes, mermaidGraph = "graph TD;\n")
+
+        assertTrue(html.contains("\"filePath\":\"HomeEntries.kt\""))
+        assertTrue(html.contains("\"line\":7"))
+        assertTrue(html.contains("\"sourceUrl\":null"))
     }
 
     @Test
