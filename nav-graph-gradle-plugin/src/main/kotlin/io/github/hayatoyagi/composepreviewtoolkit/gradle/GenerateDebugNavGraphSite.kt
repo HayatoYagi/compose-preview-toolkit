@@ -27,11 +27,10 @@ import java.util.Base64
  * embed their own representative screenshot thumbnail, clickable to reveal every screenshot
  * matched to that route ([buildGallerySiteHtml]).
  *
- * ## Why nodes and edges are (re-)scanned here rather than aggregated from each module's own precomputed index
+ * ## Why this scans every graph module's raw sources together, project-wide
  *
- * `generateDebugNavGraph` (see [GenerateDebugNavGraph]) writes a node/edge index per graph module,
- * but that task only ever sees *its own* module's sources — which breaks in two related ways for
- * a multi-module app:
+ * A scan scoped to a single module's own sources breaks in two related ways for a multi-module
+ * app:
  *
  * - **Edges**: [NavEdgeScanner]'s call-graph reachability search routinely needs to resolve a
  *   route's `entry<X> {}` registration (which lives in the module that *owns* that route) together
@@ -47,20 +46,13 @@ import java.util.Base64
  *   a sibling `impl` module) — a routine split in a real multi-module app — that module-local scan
  *   can't resolve the real declaration at all.
  *
- * So this task instead re-parses the raw `.kt` sources of every discovered graph module project
- * ([edgeSourceFiles] — the name undersells it, it's the basis for node detection too now) and runs
- * one project-wide [NavNodeScanner.scan]/[NavEdgeScanner.scan] pair over all of them together — the
+ * So this task re-parses the raw `.kt` sources of every discovered graph module project
+ * ([edgeSourceFiles] — the name undersells it, it's the basis for node detection too) and runs one
+ * project-wide [NavNodeScanner.scan]/[NavEdgeScanner.scan] pair over all of them together — the
  * same shape [NavEdgeScannerTest]'s own multi-file fixtures already exercise, and the only scan
- * scope that can see both a cross-module edge and a cross-module node's real declaration. This
- * makes each graph module's own precomputed node/edge index (written by its own
- * `generateDebugNavGraph` run) unnecessary here: this task's own combined scan is a strict superset
- * of what those precomputed indexes could ever supply, so they're deliberately not read by this
- * task at all — `generateDebugNavGraph` remains useful as a standalone, module-local sanity check
- * for a single module, but this task doesn't depend on it having run, or on it having even
- * succeeded. An unresolvable route declaration is a hard failure (see `EntryRegistrations.kt`'s
- * `resolveDeclaration`/`toNavNode`): a module-local `generateDebugNavGraph` run can legitimately
- * hit that failure for the exact cross-module-declaration shape this task exists to resolve
- * correctly, so this task must not have a hard Gradle task dependency on it succeeding.
+ * scope that can see both a cross-module edge and a cross-module node's real declaration. An
+ * unresolvable route declaration is a hard failure (see `EntryRegistrations.kt`'s
+ * `resolveDeclaration`/`toNavNode`).
  *
  * All input file collections may legitimately be empty for a given graph module (e.g. one that
  * hasn't applied the screenshot-testing plugin, so has no screenshot index or baselines) — that's
@@ -71,8 +63,7 @@ import java.util.Base64
  * runs; [edgeSourceFiles] needs no such dependency since it's plain, always-present source, not a
  * generated artifact.
  *
- * Deterministic given its declared inputs, so cacheable like `GenerateDebugNavGraph`/
- * `GenerateScreenshotPreviewTests`.
+ * Deterministic given its declared inputs, so cacheable like `GenerateScreenshotPreviewTests`.
  */
 @CacheableTask
 abstract class GenerateDebugNavGraphSite : DefaultTask() {
@@ -91,9 +82,11 @@ abstract class GenerateDebugNavGraphSite : DefaultTask() {
 
     /**
      * Fallback base directory for a node's `filePath` when the git repository root can't be
-     * determined — see [GenerateDebugNavGraph.projectDirectory]'s kdoc for the identical reasoning
-     * (also `@Internal`, not `@Input`/`@InputDirectory`, for the same cache-key reason). Normally
-     * the aggregator project's own directory.
+     * determined (see `EntryRegistrations.kt`'s `locateCallSite`) — normally the aggregator
+     * project's own directory. Deliberately `@Internal`, not `@Input`/`@InputDirectory`: it's an
+     * absolute, machine-specific path, and baking that into this `@CacheableTask`'s cache key
+     * would make it needlessly cache-miss across machines/checkouts for a fallback that's never
+     * even consulted in the common case where git is available.
      */
     @get:Internal
     abstract val projectDirectory: DirectoryProperty

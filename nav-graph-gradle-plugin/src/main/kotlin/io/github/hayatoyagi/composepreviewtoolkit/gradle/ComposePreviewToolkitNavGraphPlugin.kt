@@ -4,27 +4,36 @@ import io.github.hayatoyagi.composepreviewtoolkit.ksp.ScreenshotPreviewProcessor
 import io.github.hayatoyagi.composepreviewtoolkit.navgraph.psi.DEFAULT_CALL_GRAPH_RESOLUTION_DEPTH
 import io.github.hayatoyagi.composepreviewtoolkit.navgraph.psi.DEFAULT_ENTRY_FUNCTION_NAMES
 import io.github.hayatoyagi.composepreviewtoolkit.navgraph.psi.DEFAULT_NAVIGATE_CALL_NAMES
-import io.github.hayatoyagi.composepreviewtoolkit.navgraph.psi.NAV_EDGE_INDEX_FILE_NAME
-import io.github.hayatoyagi.composepreviewtoolkit.navgraph.psi.NAV_NODE_INDEX_FILE_NAME
 import org.gradle.api.Plugin
 import org.gradle.api.Project
 import org.gradle.api.artifacts.component.ProjectComponentIdentifier
 
 /**
- * Statically extracts a Compose Navigation3 nav graph from a module's own sources via
- * `nav-graph-psi-analyzer`'s PSI-based node and edge scanning, registering a
- * `generateDebugNavGraph` task.
+ * Statically extracts a Compose Navigation3 nav graph via `nav-graph-psi-analyzer`'s PSI-based
+ * node and edge scanning, registering a `generateDebugNavGraphSite` task.
  *
  * A deliberately separate plugin id from `io.github.hayatoyagi.compose-preview-toolkit`:
  * `nav-graph-psi-analyzer` carries `kotlin-compiler-embeddable`, a heavy dependency that shouldn't
  * land on the classpath of a consumer who only wants screenshot-test generation. This plugin
  * doesn't require that other plugin to also be applied — a module can use either, both, or neither.
  *
+ * [Project.discoverGraphModules]/[Project.wireGraphModule] read a dependency project's sources
+ * directly, so this plugin doesn't need to be applied there for its declarations to be found — a
+ * dependency module with no Compose Kotlin Gradle subplugin of its own (e.g. one that just
+ * declares route types, with no Composable UI) is discovered and scanned correctly either way. The
+ * one case where this
+ * plugin *should* also be applied on the dependency project: if that project applies its own
+ * Compose Kotlin Gradle subplugin (`org.jetbrains.kotlin.plugin.compose`) but doesn't apply this
+ * one, `kotlin-compiler-embeddable` ends up present on only some Compose modules' plugin
+ * classpaths, and Gradle can resolve the Kotlin Gradle plugin via mismatched classloaders across
+ * modules (a real, reproduced failure mode — Gradle logs "The Kotlin Gradle plugin was loaded
+ * multiple times in different subprojects, which is not supported and may break the build").
+ *
  * Unlike `ComposePreviewToolkitPlugin`, this plugin needs no KSP-apply-timing `afterEvaluate`
  * gymnastics: there's no KSP involved at all here, just plain source files read directly by the
  * task, so the extension can be wired to the task lazily and eagerly at apply() time.
  *
- * Also registers `generateDebugNavGraphSite`, which aggregates node/edge/screenshot data across
+ * `generateDebugNavGraphSite` aggregates node/edge/screenshot data across
  * every project [Project.discoverGraphModules] resolves on the "aggregator" module (typically
  * `app`, wherever this plugin is applied) and renders a self-contained `index.html` with both a
  * Mermaid.js nav graph diagram and a thumbnail gallery. Cross-project wiring for that task is
@@ -43,39 +52,14 @@ class ComposePreviewToolkitNavGraphPlugin : Plugin<Project> {
             routeNameSuffixesToStrip.convention(setOf("Destination", "Route"))
         }
 
-        target.tasks.register("generateDebugNavGraph", GenerateDebugNavGraph::class.java) { task ->
-            task.sourceFiles.from(
-                target.layout.projectDirectory.dir("src/main/kotlin").asFileTree.matching { filter ->
-                    filter.include("**/*.kt")
-                },
-            )
-            task.entryFunctionNames.set(extension.entryFunctionNames)
-            task.navigateCallNames.set(extension.navigateCallNames)
-            task.callGraphResolutionDepth.set(extension.callGraphResolutionDepth)
-            task.projectDirectory.set(target.layout.projectDirectory)
-            task.outputFile.set(
-                target.layout.buildDirectory.file(
-                    "generated/composePreviewToolkit/navGraph/debug/$NAV_NODE_INDEX_FILE_NAME.txt",
-                ),
-            )
-            task.edgeOutputFile.set(
-                target.layout.buildDirectory.file(
-                    "generated/composePreviewToolkit/navGraph/debug/$NAV_EDGE_INDEX_FILE_NAME.txt",
-                ),
-            )
-        }
-
         val generateDebugNavGraphSite =
             target.tasks.register("generateDebugNavGraphSite", GenerateDebugNavGraphSite::class.java) { task ->
                 task.routeNameSuffixesToStrip.set(extension.routeNameSuffixesToStrip)
-                // Same convention-backed properties generateDebugNavGraph uses, reused here for
-                // this task's own project-wide node/edge (re-)scan — see GenerateDebugNavGraphSite's
-                // kdoc for why a project-wide scan is necessary at all.
                 task.entryFunctionNames.set(extension.entryFunctionNames)
                 task.navigateCallNames.set(extension.navigateCallNames)
                 task.callGraphResolutionDepth.set(extension.callGraphResolutionDepth)
-                // Same fallback-only role as GenerateDebugNavGraph's own projectDirectory: only
-                // consulted for a node's filePath when the git repo root can't be determined.
+                // Fallback-only: only consulted for a node's filePath when the git repo root can't
+                // be determined.
                 task.projectDirectory.set(target.layout.projectDirectory)
                 task.outputDirectory.set(target.layout.buildDirectory.dir("composePreviewToolkit/navGraphSite/debug"))
             }
@@ -107,9 +91,9 @@ class ComposePreviewToolkitNavGraphPlugin : Plugin<Project> {
      * resolving this method's classpath is what forced that evaluation moments earlier in this same
      * `afterEvaluate` callback.
      *
-     * `"debugCompileClasspath"` matches this plugin's debug-build-type-only scope elsewhere
-     * (`generateDebugNavGraph`, `generateDebugNavGraphSite`). If it doesn't exist on this project,
-     * this degrades to just this project's own path rather than failing the build.
+     * `"debugCompileClasspath"` matches `generateDebugNavGraphSite`'s own debug-build-type-only
+     * scope. If it doesn't exist on this project, this degrades to just this project's own path
+     * rather than failing the build.
      *
      * Called from inside [target]'s `afterEvaluate`, once AGP has finished creating the debug
      * variant's configurations.
@@ -139,10 +123,7 @@ class ComposePreviewToolkitNavGraphPlugin : Plugin<Project> {
      * indexes (mirroring `ComposePreviewToolkitPlugin`'s own glob technique for the KSP output
      * directory) and adds a task dependency on that project's own `kspDebugKotlin`. Also globs
      * [path]'s raw `.kt` sources into `edgeSourceFiles` — see `GenerateDebugNavGraphSite`'s kdoc for
-     * why a combined multi-module scan is needed there. Deliberately no task dependency on [path]'s
-     * own `generateDebugNavGraph`: that task's module-local scan can legitimately hard-fail for
-     * exactly the cross-module shape this task resolves correctly, so `generateDebugNavGraphSite`
-     * must not depend on it succeeding.
+     * why a combined multi-module scan is needed there.
      *
      * Two Gradle-lifecycle guards below, both stemming from [discoverGraphModules] forcing every
      * graph module to fully evaluate before this runs:
@@ -159,9 +140,8 @@ class ComposePreviewToolkitNavGraphPlugin : Plugin<Project> {
         val graphModuleProject = project(path)
 
         generateDebugNavGraphSite.configure { task ->
-            // Raw source, not a generated artifact — needs no task dependency (mirroring
-            // generateDebugNavGraph's own sourceFiles wiring). See GenerateDebugNavGraphSite's
-            // kdoc for why this task needs [path]'s actual sources, not just a precomputed index: a
+            // Raw source, not a generated artifact — needs no task dependency. See
+            // GenerateDebugNavGraphSite's kdoc for why this task needs [path]'s actual sources: a
             // project-wide scan is the only scope that can resolve edges and node qualifiedNames
             // whose `entry<X> {}` registration and declaration (or reaching `navigateTo(...)` call
             // site) live in different graph-module projects, which is the common case in practice.

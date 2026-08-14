@@ -145,12 +145,10 @@ for every input.
 
 ## Nav Graph
 
-A **separate** plugin id, `io.github.hayatoyagi.compose-preview-toolkit.navgraph` — not bundled
-into the plugin above, since it pulls in a heavy embedded-Kotlin-compiler dependency that only
-Navigation3 users need. It statically scans a module's
-own `src/main/kotlin` via Kotlin PSI (no type resolution) for Navigation3 `entry<Route> { ... }`
-registrations (nodes) and `navigateTo`/`navigate`-shaped calls reachable from each one via a
-bounded-depth call-graph search (edges):
+A **separate** plugin id, `io.github.hayatoyagi.compose-preview-toolkit.navgraph`. It statically
+scans every discovered module's `src/main/kotlin` via Kotlin PSI (no type resolution) for
+Navigation3 `entry<Route> { ... }` registrations (nodes) and `navigateTo`/`navigate`-shaped calls
+reachable from each one via a bounded-depth call-graph search (edges):
 
 ```kotlin
 // feature module's build.gradle.kts
@@ -159,9 +157,12 @@ plugins {
 }
 ```
 
-```
-./gradlew generateDebugNavGraph
-```
+Only needs to be applied where you run `generateDebugNavGraphSite` — a dependency module with no
+Compose Kotlin Gradle subplugin of its own (e.g. one that just declares route types, with no
+Composable UI) is discovered and scanned via its dependents without applying this plugin there too.
+One exception: if a module *does* apply its own Compose Kotlin Gradle subplugin but not this one,
+Gradle can end up loading the Kotlin Gradle plugin via mismatched classloaders across modules —
+apply this plugin there too if you hit that.
 
 Edge detection is best-effort and name-based, not type resolution: ambiguous callee names and calls
 beyond the configured depth are dropped with a warning rather than guessed, and there's no
