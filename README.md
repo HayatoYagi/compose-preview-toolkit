@@ -1,6 +1,6 @@
 # compose-preview-toolkit
 
-[![Maven Central](https://img.shields.io/maven-central/v/io.github.hayatoyagi/compose-preview-toolkit-annotations)](https://central.sonatype.com/namespace/io.github.hayatoyagi)
+[![Maven Central](https://img.shields.io/maven-central/v/io.github.hayatoyagi/compose-preview-toolkit-annotations)](https://central.sonatype.com/artifact/io.github.hayatoyagi/compose-preview-toolkit-annotations)
 [![Gradle Plugin Portal](https://img.shields.io/badge/Gradle_Plugin_Portal-02303A?logo=gradle&logoColor=white)](https://plugins.gradle.org/plugin/io.github.hayatoyagi.compose-preview-toolkit)
 
 A Gradle plugin that turns a single marker annotation on your Jetpack Compose `@Preview`
