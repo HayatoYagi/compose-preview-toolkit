@@ -7,6 +7,7 @@ import io.github.hayatoyagi.composepreviewtoolkit.navgraph.psi.DEFAULT_NAVIGATE_
 import org.gradle.api.Plugin
 import org.gradle.api.Project
 import org.gradle.api.artifacts.component.ProjectComponentIdentifier
+import java.util.concurrent.Callable
 
 /**
  * Statically extracts a Compose Navigation3 nav graph via `nav-graph-psi-analyzer`'s PSI-based
@@ -17,17 +18,17 @@ import org.gradle.api.artifacts.component.ProjectComponentIdentifier
  * land on the classpath of a consumer who only wants screenshot-test generation. This plugin
  * doesn't require that other plugin to also be applied — a module can use either, both, or neither.
  *
- * [Project.discoverGraphModules]/[Project.wireGraphModule] read a dependency project's sources
- * directly, so this plugin doesn't need to be applied there for its declarations to be found — a
+ * [Project.discoverGraphModules] reads a dependency project's sources directly, so this plugin
+ * doesn't need to be applied there for its declarations to be found — a
  * dependency module with no Compose Kotlin Gradle subplugin of its own (e.g. one that just
  * declares route types, with no Composable UI) is discovered and scanned correctly either way. The
- * one case where this
- * plugin *should* also be applied on the dependency project: if that project applies its own
- * Compose Kotlin Gradle subplugin (`org.jetbrains.kotlin.plugin.compose`) but doesn't apply this
- * one, `kotlin-compiler-embeddable` ends up present on only some Compose modules' plugin
- * classpaths, and Gradle can resolve the Kotlin Gradle plugin via mismatched classloaders across
- * modules (a real, reproduced failure mode — Gradle logs "The Kotlin Gradle plugin was loaded
- * multiple times in different subprojects, which is not supported and may break the build").
+ * one case where this plugin *should* also be applied on the dependency project: if that project
+ * applies its own Compose Kotlin Gradle subplugin (`org.jetbrains.kotlin.plugin.compose`) but
+ * doesn't apply this one, `kotlin-compiler-embeddable` ends up present on only some Compose
+ * modules' plugin classpaths, and Gradle can resolve the Kotlin Gradle plugin via mismatched
+ * classloaders across modules (a real, reproduced failure mode — Gradle logs "The Kotlin Gradle
+ * plugin was loaded multiple times in different subprojects, which is not supported and may break
+ * the build").
  *
  * Unlike `ComposePreviewToolkitPlugin`, this plugin needs no KSP-apply-timing `afterEvaluate`
  * gymnastics: there's no KSP involved at all here, just plain source files read directly by the
@@ -37,8 +38,9 @@ import org.gradle.api.artifacts.component.ProjectComponentIdentifier
  * every project [Project.discoverGraphModules] resolves on the "aggregator" module (typically
  * `app`, wherever this plugin is applied) and renders a self-contained `index.html` with both a
  * Mermaid.js nav graph diagram and a thumbnail gallery. Cross-project wiring for that task is
- * deferred to [target]'s `afterEvaluate` since [Project.discoverGraphModules] needs AGP to have
- * already created the debug variant's configurations, which only happens by then.
+ * deferred (see [apply]'s `Callable`s) until Gradle actually needs it, since
+ * [Project.discoverGraphModules] needs AGP to have already created the debug variant's
+ * configurations, which only happens once every project has finished its own configuration.
  */
 class ComposePreviewToolkitNavGraphPlugin : Plugin<Project> {
     override fun apply(target: Project) {
@@ -64,11 +66,52 @@ class ComposePreviewToolkitNavGraphPlugin : Plugin<Project> {
                 task.outputDirectory.set(target.layout.buildDirectory.dir("composePreviewToolkit/navGraphSite/debug"))
             }
 
-        // Deferred to afterEvaluate: discoverGraphModules() reads the resolved
-        // "debugCompileClasspath" configuration, which AGP only finishes creating once this
-        // project's own build script (and the plugins it applies) have been evaluated.
-        target.afterEvaluate {
-            target.discoverGraphModules().forEach { path -> target.wireGraphModule(path, generateDebugNavGraphSite) }
+        // Memoized: every Callable below reads this same value, but debugCompileClasspath should
+        // only be resolved once. Deferred (not resolved right here) until Gradle actually needs a
+        // task's dependencies/inputs, at task-graph-computation time — by then every project in the
+        // build has already configured normally, so this needs none of ComposePreviewToolkitPlugin's
+        // own KSP-apply-timing afterEvaluate/withPlugin machinery to know a graph module's plugins
+        // are already applied.
+        val graphModules by lazy { target.discoverGraphModules() }
+
+        generateDebugNavGraphSite.configure { task ->
+            task.edgeSourceFiles.from(
+                Callable {
+                    graphModules.map { path ->
+                        target.project(path).layout.projectDirectory.dir("src/main/kotlin").asFileTree
+                            .matching { filter -> filter.include("**/*.kt") }
+                    }
+                },
+            )
+            task.screenshotIndexFiles.from(
+                Callable {
+                    graphModules.map { path ->
+                        target.project(path).layout.buildDirectory.dir("generated/ksp/debug/resources")
+                            .map { dir ->
+                                dir.asFileTree.matching { filter ->
+                                    filter.include("**/${ScreenshotPreviewProcessorProvider.DEFAULT_INDEX_FILE_NAME}*.txt")
+                                }
+                            }
+                    }
+                },
+            )
+            task.screenshotReferenceImages.from(
+                Callable {
+                    graphModules.map { path ->
+                        target.project(path).layout.projectDirectory.dir("src/screenshotTestDebug/reference")
+                            .asFileTree.matching { filter -> filter.include("**/*.png") }
+                    }
+                },
+            )
+            task.dependsOn(
+                Callable {
+                    graphModules.mapNotNull { path ->
+                        val graphModuleProject = target.project(path)
+                        graphModuleProject.tasks.findByName("kspDebugKotlin")
+                            .takeIf { graphModuleProject.pluginManager.findPlugin(SCREENSHOT_PLUGIN_ID) != null }
+                    }
+                },
+            )
         }
     }
 
@@ -84,19 +127,14 @@ class ComposePreviewToolkitNavGraphPlugin : Plugin<Project> {
      * ever reads back plain [String] project paths instead of touching those projects' live
      * build-script objects directly.
      *
-     * Resolving `debugCompileClasspath` to real dependency projects (not just declared dependency
-     * coordinates, which would stay lazy) forces Gradle to fully evaluate every project it resolves
-     * to. [wireGraphModule] accounts for this: every path returned here is guaranteed to already be
-     * fully evaluated (`Project.getState().getExecuted() == true`) by the time it runs, since
-     * resolving this method's classpath is what forced that evaluation moments earlier in this same
-     * `afterEvaluate` callback.
-     *
      * `"debugCompileClasspath"` matches `generateDebugNavGraphSite`'s own debug-build-type-only
      * scope. If it doesn't exist on this project, this degrades to just this project's own path
      * rather than failing the build.
      *
-     * Called from inside [target]'s `afterEvaluate`, once AGP has finished creating the debug
-     * variant's configurations.
+     * Called lazily, at task-graph-computation time (see the `Callable`s wrapping this in [apply]) —
+     * by then every project in the build has already finished its own normal configuration, so
+     * `debugCompileClasspath` is guaranteed to exist and every discovered path's own plugins are
+     * guaranteed to already be applied.
      */
     private fun Project.discoverGraphModules(): Set<String> {
         val resolvedProjectPaths = configurations.findByName("debugCompileClasspath")
@@ -116,74 +154,6 @@ class ComposePreviewToolkitNavGraphPlugin : Plugin<Project> {
             .orEmpty()
 
         return (resolvedProjectPaths + path).toSet()
-    }
-
-    /**
-     * Wires one [discoverGraphModules] entry into [generateDebugNavGraphSite]: globs its screenshot
-     * indexes (mirroring `ComposePreviewToolkitPlugin`'s own glob technique for the KSP output
-     * directory) and adds a task dependency on that project's own `kspDebugKotlin`. Also globs
-     * [path]'s raw `.kt` sources into `edgeSourceFiles` — see `GenerateDebugNavGraphSite`'s kdoc for
-     * why a combined multi-module scan is needed there.
-     *
-     * Two Gradle-lifecycle guards below, both stemming from [discoverGraphModules] forcing every
-     * graph module to fully evaluate before this runs:
-     * - `pluginManager.withPlugin(id) { ... }` (not `tasks.named(...)` directly) still works if a
-     *   graph module's plugin somehow isn't applied yet, though in practice it fires synchronously.
-     * - The nested `graphModuleProject.afterEvaluate { ... }` is guarded by
-     *   `graphModuleProject.state.executed`: calling `afterEvaluate` on an already-evaluated project
-     *   throws, so this runs the wiring immediately instead when that's already true.
-     */
-    private fun Project.wireGraphModule(
-        path: String,
-        generateDebugNavGraphSite: org.gradle.api.tasks.TaskProvider<GenerateDebugNavGraphSite>,
-    ) {
-        val graphModuleProject = project(path)
-
-        generateDebugNavGraphSite.configure { task ->
-            // Raw source, not a generated artifact — needs no task dependency. See
-            // GenerateDebugNavGraphSite's kdoc for why this task needs [path]'s actual sources: a
-            // project-wide scan is the only scope that can resolve edges and node qualifiedNames
-            // whose `entry<X> {}` registration and declaration (or reaching `navigateTo(...)` call
-            // site) live in different graph-module projects, which is the common case in practice.
-            task.edgeSourceFiles.from(
-                graphModuleProject.layout.projectDirectory.dir("src/main/kotlin").asFileTree.matching { filter ->
-                    filter.include("**/*.kt")
-                },
-            )
-            task.screenshotIndexFiles.from(
-                graphModuleProject.layout.buildDirectory.dir("generated/ksp/debug/resources")
-                    .map { dir ->
-                        dir.asFileTree.matching { filter ->
-                            filter.include("**/${ScreenshotPreviewProcessorProvider.DEFAULT_INDEX_FILE_NAME}*.txt")
-                        }
-                    },
-            )
-            task.screenshotReferenceImages.from(
-                graphModuleProject.layout.projectDirectory.dir("src/screenshotTestDebug/reference").asFileTree
-                    .matching { filter -> filter.include("**/*.png") },
-            )
-        }
-
-        // kspDebugKotlin doesn't exist until AGP has finished creating the debug variant's KSP
-        // tasks, which is only guaranteed once graphModuleProject's own afterEvaluate listeners
-        // (AGP's own included) have run — nested here inside withPlugin so it only runs for graph
-        // modules that actually apply the screenshot-testing plugin (SCREENSHOT_PLUGIN_ID) at all.
-        // See this method's kdoc for why the state.executed guard below is required here (unlike
-        // ComposePreviewToolkitPlugin's own unconditional-afterEvaluate version of this same
-        // pattern): graphModuleProject has routinely already finished evaluating by this point.
-        graphModuleProject.pluginManager.withPlugin(SCREENSHOT_PLUGIN_ID) {
-            val wireKspDependency = {
-                graphModuleProject.tasks.findByName("kspDebugKotlin")?.let { kspDebugKotlin ->
-                    generateDebugNavGraphSite.configure { task -> task.dependsOn(kspDebugKotlin) }
-                }
-                Unit
-            }
-            if (graphModuleProject.state.executed) {
-                wireKspDependency()
-            } else {
-                graphModuleProject.afterEvaluate { wireKspDependency() }
-            }
-        }
     }
 
     private companion object {
