@@ -183,12 +183,8 @@ plugins {
 }
 ```
 
-Only needs to be applied where you run `generateDebugNavGraphSite` — a dependency module with no
-Compose Kotlin Gradle subplugin of its own (e.g. one that just declares route types, with no
-Composable UI) is discovered and scanned via its dependents without applying this plugin there too.
-One exception: if a module *does* apply its own Compose Kotlin Gradle subplugin but not this one,
-Gradle can end up loading the Kotlin Gradle plugin via mismatched classloaders across modules —
-apply this plugin there too if you hit that.
+Only needs to be applied where you run `generateDebugNavGraphSite` — a dependency module is
+discovered and scanned via its dependents without applying this plugin there too.
 
 Edge detection is best-effort and name-based, not type resolution: ambiguous callee names and calls
 beyond the configured depth are dropped with a warning rather than guessed, and there's no
@@ -256,8 +252,9 @@ applying the plugin(s) exactly like a real consumer would.
 
 `sample/app` is a Navigation3 app wiring together `sample/feature-a` and `sample/feature-b`,
 demonstrating the nav-graph plugin's node extraction and gallery site generation (see "Nav Graph"
-above) alongside the screenshot-test plugin. All three modules apply both plugins, so every route
-gets a real thumbnail in the generated gallery.
+above) alongside the screenshot-test plugin. All three modules apply the screenshot-test plugin, so
+every route gets a real thumbnail in the generated gallery; only `sample/app` applies the nav-graph
+plugin, demonstrating "apply once, on the aggregator only" (see "Nav Graph" above).
 
 The sample also demonstrates both edge-detection shapes: `feature-a`'s `onProceedClick`, written at
 the app level and passed in as a callback (`AppNavHost.kt`/`FeatureANavEntries.kt`), and

@@ -23,10 +23,12 @@ Re-run the `publishToMavenLocal` step after any change to `annotations`, `ksp-pr
 it up in `sample`.
 
 `sample/` is itself multi-module: `sample/app` (Nav3 host, applies both the screenshot-test and
-navgraph plugins), `sample/feature-a`, and `sample/feature-b` (navgraph plugin only — see
+navgraph plugins), `sample/feature-a`, and `sample/feature-b` (screenshot-test plugin only — see
 `AppNavHost.kt` for how they're wired). `:app` is the aggregator: running `generateDebugNavGraphSite`
 there discovers `feature-a`/`feature-b` via `:app`'s own project dependencies and scans all three
-together (see README.md's "Gallery site" subsection).
+together (see README.md's "Gallery site" subsection). `sample/build.gradle.kts` declares every
+plugin used anywhere in `sample/` with `apply false` — standard Gradle multi-module practice,
+independent of which subproject applies which plugin.
 
 ## Opening a PR
 

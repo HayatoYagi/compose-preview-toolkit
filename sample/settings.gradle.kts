@@ -10,10 +10,10 @@
 //
 // Local development: from the repo root, run
 //   ./gradlew :annotations:publishToMavenLocal :ksp-processor:publishToMavenLocal :gradle-plugin:publishToMavenLocal \
-//             :nav-graph-psi-analyzer:publishToMavenLocal :nav-graph-gradle-plugin:publishToMavenLocal
-// then this module resolves everything via mavenLocal() below. See the root README. `:app`,
-// `:feature-a`, and `:feature-b` all apply the navgraph plugin, so the last two publishes above
-// are just as required as the first three, not optional.
+//             :nav-graph-model:publishToMavenLocal :nav-graph-psi-analyzer:publishToMavenLocal \
+//             :nav-graph-gradle-plugin:publishToMavenLocal
+// then this module resolves everything via mavenLocal() below. See the root README and
+// CONTRIBUTING.md.
 pluginManagement {
     repositories {
         mavenLocal()

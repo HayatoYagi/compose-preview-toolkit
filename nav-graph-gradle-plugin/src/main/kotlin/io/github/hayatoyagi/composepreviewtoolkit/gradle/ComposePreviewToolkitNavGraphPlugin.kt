@@ -29,14 +29,15 @@ import java.util.concurrent.Callable
  * modules, real for a monorepo with many.
  *
  * [Project.discoverGraphModules] reads a dependency project's sources directly, so this plugin
- * isn't functionally required there for its declarations to be found — a dependency module with
- * no Compose Kotlin Gradle subplugin of its own (e.g. one that just declares route types, with no
- * Composable UI) is discovered and scanned correctly either way. The one case where it *should*
- * still be applied: a dependency module that applies its own Compose Kotlin Gradle subplugin
- * (`org.jetbrains.kotlin.plugin.compose`) can otherwise hit a separate, harder Kotlin-Gradle-Plugin
- * classloader mismatch ("The Kotlin Gradle plugin was loaded multiple times in different
- * subprojects") that this isolation does **not** eliminate — root-caused separately in
- * `HayatoYagi/compose-preview-toolkit#53`.
+ * isn't functionally required on every dependency module for its declarations to be found — a
+ * module reachable via project dependency is discovered and scanned correctly whether or not it
+ * applies this plugin itself.
+ *
+ * Applying a Compose Kotlin Gradle subplugin (`org.jetbrains.kotlin.plugin.compose`) asymmetrically
+ * across subprojects — present on some, absent on others — can trigger a separate Gradle-core
+ * issue: "The Kotlin Gradle plugin was loaded multiple times in different subprojects". This is
+ * unrelated to this plugin's own classpath isolation above and isn't fixed by applying this plugin
+ * more broadly — see `HayatoYagi/compose-preview-toolkit#53` for the root cause and fix.
  *
  * Unlike `ComposePreviewToolkitPlugin`, this plugin needs no KSP-apply-timing `afterEvaluate`
  * gymnastics: there's no KSP involved at all here, just plain source files read directly by the

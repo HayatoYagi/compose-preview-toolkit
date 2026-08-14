@@ -14,9 +14,6 @@ plugins {
     // sample/app) so the gallery site's FeatureARoute node gets a real screenshot thumbnail via
     // the naming heuristic, same as HomeRoute already does — see README.md's Sample App section.
     alias(libs.plugins.composePreviewToolkit)
-    // See sample/app/build.gradle.kts for why this is a separate plugin id from
-    // io.github.hayatoyagi.compose-preview-toolkit's.
-    alias(libs.plugins.composePreviewToolkitNavGraph)
 }
 
 android {
