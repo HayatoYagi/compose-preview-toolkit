@@ -147,7 +147,7 @@ for every input.
 
 A **separate** plugin id, `io.github.hayatoyagi.compose-preview-toolkit.navgraph` — not bundled
 into the plugin above, since it pulls in a heavy embedded-Kotlin-compiler dependency that only
-Navigation3 users need (see `nav-graph-gradle-plugin` kdoc for why). It statically scans a module's
+Navigation3 users need. It statically scans a module's
 own `src/main/kotlin` via Kotlin PSI (no type resolution) for Navigation3 `entry<Route> { ... }`
 registrations (nodes) and `navigateTo`/`navigate`-shaped calls reachable from each one via a
 bounded-depth call-graph search (edges), then writes a node + edge index:
