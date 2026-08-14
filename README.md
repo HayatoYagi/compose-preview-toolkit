@@ -213,6 +213,9 @@ link to that exact line on GitHub — otherwise it's shown as plain, non-interac
 
 ### Composite GitHub Action
 
+`mode: 'build'` (the default) just runs the Gradle task; `mode: 'github-pages'` additionally
+manages a persisted main site plus live per-PR previews on GitHub Pages:
+
 ```yaml
 - uses: HayatoYagi/compose-preview-toolkit/.github/actions/deploy-nav-graph-site@v0.3.0
   with:
@@ -222,7 +225,7 @@ link to that exact line on GitHub — otherwise it's shown as plain, non-interac
 ```
 
 See [.github/actions/deploy-nav-graph-site/README.md](.github/actions/deploy-nav-graph-site/README.md)
-for the two `mode` options, required permissions/settings, and a worked example, or
+for the full mode-by-mode breakdown, required permissions/settings, and a worked example, or
 [action.yml](.github/actions/deploy-nav-graph-site/action.yml) for every input.
 
 ## Sample App
