@@ -92,17 +92,6 @@ private fun KtCallExpression.toNavNode(
     )
 }
 
-/**
- * There's deliberately no best-effort fallback here (e.g. guessing the route shares the call
- * site's package) for a route whose declaration can't be found among [files][findEntryRegistrations]
- * scanned: a wrong-but-plausible guess is worse than a loud failure for something this checkable —
- * matches this toolkit's stated philosophy of failing when the scanner can't determine something
- * real rather than silently producing a misleading result. In practice this should be rare: a
- * caller with proper scan scope (e.g. `nav-graph-gradle-plugin`'s `generateDebugNavGraphSite`,
- * whose scan automatically covers the full resolved project-dependency graph) will always have
- * the declaration in view unless the route type genuinely comes from outside that graph — a real
- * configuration problem worth surfacing, not papering over.
- */
 private fun KtCallExpression.unresolvedDeclarationMessage(
     writtenChain: List<String>,
     fallbackBaseDirectory: File,

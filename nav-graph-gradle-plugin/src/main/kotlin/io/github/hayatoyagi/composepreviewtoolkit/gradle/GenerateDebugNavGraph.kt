@@ -33,10 +33,9 @@ import org.gradle.api.tasks.TaskAction
  * Because a module-local scan can't see declarations outside its own sources, this can throw when
  * a registered route is declared in a different module than the one registering it (a routine
  * `api`/`impl` split in a real multi-module app) — see `EntryRegistrations.kt`'s
- * `resolveDeclaration`/`toNavNode`, which has no best-effort fallback for an unresolvable
- * declaration. That's expected for this task specifically: it's a module-local sanity check, not
- * the source of truth for a multi-module app's graph — run `generateDebugNavGraphSite` on the
- * aggregator module for that, whose own project-wide scan resolves exactly this case correctly.
+ * `resolveDeclaration`/`toNavNode`. This task is a module-local sanity check, not the source of
+ * truth for a multi-module app's graph — run `generateDebugNavGraphSite` on the aggregator module
+ * for that, whose own project-wide scan resolves exactly this case correctly.
  *
  * [NavEdgeScanner]'s warnings are surfaced via this task's own [org.gradle.api.logging.Logger]
  * rather than failing the build: a nav edge candidate the scanner couldn't resolve is a

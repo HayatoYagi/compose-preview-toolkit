@@ -89,46 +89,30 @@ class ComposePreviewToolkitNavGraphPlugin : Plugin<Project> {
     }
 
     /**
-     * The full set of Gradle project paths `generateDebugNavGraphSite` aggregates screenshot data
-     * across (and, via [GenerateDebugNavGraphSite]'s own project-wide PSI scan, node/edge data
-     * across too): this project's own path plus every project dependency resolvable (transitively)
-     * from its `debugCompileClasspath` configuration. There's no way to override this with a
-     * narrower, manually maintained set — see [ComposePreviewToolkitNavGraphExtension]'s kdoc for
-     * why an auto-discovered set is the whole point (a hand-maintained list is exactly what let a
-     * route's owning `api` module go unlisted in the first place, silently producing a wrong
-     * `qualifiedName` for that route).
+     * The full set of Gradle project paths `generateDebugNavGraphSite` aggregates node/edge/
+     * screenshot data across: this project's own path plus every project dependency resolvable
+     * (transitively) from its `debugCompileClasspath` configuration. Not overridable — a route
+     * whose declaration lives outside the scanned set is a hard failure (see
+     * `EntryRegistrations.kt`), so "everything reachable" is the only safe scope.
      *
-     * Deliberately uses `Configuration.incoming.resolutionResult` — Gradle's own dependency
-     * resolution engine — instead of manually walking other projects' `configurations`/
-     * `pluginManager` to discover what they depend on: the latter would require directly touching
-     * those projects' own live build-script objects, which this avoids by only ever reading back
-     * plain [String] project paths out of a resolved dependency graph.
+     * Uses `Configuration.incoming.resolutionResult` — Gradle's own dependency resolution engine —
+     * rather than manually walking other projects' `configurations`/`pluginManager`, so this only
+     * ever reads back plain [String] project paths instead of touching those projects' live
+     * build-script objects directly.
      *
-     * This does **not** avoid eager cross-project evaluation, though: resolving
-     * `debugCompileClasspath`'s `resolutionResult` to real dependency projects (not just declared
-     * dependency coordinates, which would be lazy) requires Gradle to know those projects' own
-     * configured outputs, which forces it to fully evaluate every project this configuration
-     * transitively resolves to — confirmed empirically against `compose-preview-toolkit-sample`'s
-     * real `:app` -> `:feature-a`/`:feature-b` dependency shape (an earlier version of this code
-     * assumed resolution was lazy here and crashed on exactly this). [wireGraphModule] is written
-     * to account for that: every project this method returns a path for is guaranteed to have
-     * already finished evaluating (`Project.getState().getExecuted() == true`) by the time
-     * [wireGraphModule] runs for it, since resolving this method's classpath is literally what
-     * forced that evaluation to happen, moments earlier in this same `afterEvaluate` callback.
+     * Resolving `debugCompileClasspath` to real dependency projects (not just declared dependency
+     * coordinates, which would stay lazy) forces Gradle to fully evaluate every project it resolves
+     * to. [wireGraphModule] accounts for this: every path returned here is guaranteed to already be
+     * fully evaluated (`Project.getState().getExecuted() == true`) by the time it runs, since
+     * resolving this method's classpath is what forced that evaluation moments earlier in this same
+     * `afterEvaluate` callback.
      *
-     * `"debugCompileClasspath"` is used to match this plugin's existing debug-build-type-only scope
-     * everywhere else (`generateDebugNavGraph`, `generateDebugNavGraphSite`). If it doesn't exist
-     * on this project (e.g. applied to a non-Android module, or a variant name this simple lookup
-     * doesn't anticipate), this degrades to just this project's own path rather than failing the
-     * build — the resulting site would only show this project's own nodes.
+     * `"debugCompileClasspath"` matches this plugin's debug-build-type-only scope elsewhere
+     * (`generateDebugNavGraph`, `generateDebugNavGraphSite`). If it doesn't exist on this project,
+     * this degrades to just this project's own path rather than failing the build.
      *
-     * Over-including a resolved dependency project that turns out to have no nav entries at all is
-     * fine (see [ComposePreviewToolkitNavGraphExtension]'s kdoc) — this deliberately doesn't try to
-     * filter down to "only modules that apply this plugin", which would require exactly the eager
-     * cross-project introspection this design avoids.
-     *
-     * Called from inside [target]'s `afterEvaluate`, by which point AGP has finished creating the
-     * debug variant's configurations.
+     * Called from inside [target]'s `afterEvaluate`, once AGP has finished creating the debug
+     * variant's configurations.
      */
     private fun Project.discoverGraphModules(): Set<String> {
         val resolvedProjectPaths = configurations.findByName("debugCompileClasspath")
@@ -139,7 +123,7 @@ class ComposePreviewToolkitNavGraphPlugin : Plugin<Project> {
                 }.getOrElse { failure ->
                     logger.warn(
                         "compose-preview-toolkit-navgraph: couldn't resolve 'debugCompileClasspath' to " +
-                            "discover graphModules for $path, falling back to just this project. " +
+                            "discover graph modules for $path, falling back to just this project. " +
                             "Cause: ${failure.message}",
                     )
                     emptyList()
@@ -151,37 +135,22 @@ class ComposePreviewToolkitNavGraphPlugin : Plugin<Project> {
     }
 
     /**
-     * Wires one [discoverGraphModules] entry into [generateDebugNavGraphSite]: globs its
-     * screenshot indexes (mirroring `ComposePreviewToolkitPlugin`'s own `asFileTree.matching { ... }`
-     * glob technique for the KSP output directory, just pointed at [path]'s project instead of the
-     * local one) and adds a real Gradle task dependency on that project's own `kspDebugKotlin` so
-     * this task never races its output. Also globs [path]'s raw `.kt` sources into
-     * `edgeSourceFiles` — plain source, so no task dependency needed for that one —
-     * since `GenerateDebugNavGraphSite` needs the actual combined project sources (not a
-     * precomputed per-module index) to resolve both edges and node `qualifiedName`s that cross a
-     * graph-module boundary; see that task's kdoc for why this turned out to be necessary, and
-     * deliberately does **not** add a task dependency on [path]'s own `generateDebugNavGraph` —
-     * that task's module-local scan can legitimately hard-fail for exactly the cross-module
-     * declaration shape this task exists to resolve correctly (see `EntryRegistrations.kt`), so
-     * `generateDebugNavGraphSite` must not depend on it succeeding.
+     * Wires one [discoverGraphModules] entry into [generateDebugNavGraphSite]: globs its screenshot
+     * indexes (mirroring `ComposePreviewToolkitPlugin`'s own glob technique for the KSP output
+     * directory) and adds a task dependency on that project's own `kspDebugKotlin`. Also globs
+     * [path]'s raw `.kt` sources into `edgeSourceFiles` — see `GenerateDebugNavGraphSite`'s kdoc for
+     * why a combined multi-module scan is needed there. Deliberately no task dependency on [path]'s
+     * own `generateDebugNavGraph`: that task's module-local scan can legitimately hard-fail for
+     * exactly the cross-module shape this task resolves correctly, so `generateDebugNavGraphSite`
+     * must not depend on it succeeding.
      *
-     * Cross-project task dependencies use `pluginManager.withPlugin(id) { ... }` rather than
-     * grabbing `tasks.named(...)` unconditionally, so this works whether [path]'s plugin happened
-     * to already be applied by the time this runs or not — see [discoverGraphModules]'s kdoc for
-     * why, in practice, it always already has been: resolving its `debugCompileClasspath` forces
-     * every project it resolves to (which is exactly the set [path] ranges over) to fully evaluate
-     * first, which necessarily runs that project's own `plugins { ... }` application. `withPlugin`'s
-     * callback therefore fires synchronously here rather than later, but is still the right tool
-     * since it degrades correctly in the one case where a graph module *hasn't* pre-evaluated (the
-     * fallback path in [discoverGraphModules] when classpath resolution itself fails).
-     *
-     * The nested `graphModuleProject.afterEvaluate { ... }` inside the `withPlugin` callback below
-     * needs the same care for a different reason: [discoverGraphModules] having already forced
-     * [path]'s project to fully evaluate means it's routinely already past the point where
-     * `Project.afterEvaluate` can be called on it at all — calling it anyway throws
-     * ("Cannot run Project.afterEvaluate(Action) when the project is already evaluated"), confirmed
-     * empirically. Guarding on `graphModuleProject.state.executed` picks the right one of "run now"
-     * vs. "run once evaluation finishes" for whichever case actually holds.
+     * Two Gradle-lifecycle guards below, both stemming from [discoverGraphModules] forcing every
+     * graph module to fully evaluate before this runs:
+     * - `pluginManager.withPlugin(id) { ... }` (not `tasks.named(...)` directly) still works if a
+     *   graph module's plugin somehow isn't applied yet, though in practice it fires synchronously.
+     * - The nested `graphModuleProject.afterEvaluate { ... }` is guarded by
+     *   `graphModuleProject.state.executed`: calling `afterEvaluate` on an already-evaluated project
+     *   throws, so this runs the wiring immediately instead when that's already true.
      */
     private fun Project.wireGraphModule(
         path: String,

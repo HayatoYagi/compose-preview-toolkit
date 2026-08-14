@@ -179,21 +179,14 @@ routes into its own `NavDisplay`), just run `generateDebugNavGraphSite`:
 ./gradlew :app:generateDebugNavGraphSite
 ```
 
-There's nothing to configure: the set of projects it scans is discovered automatically from the
-aggregator's own resolved `debugCompileClasspath` (transitively, so every module it depends on —
-directly or indirectly — is included), plus the aggregator itself. This is deliberate: a
-hand-maintained module list is exactly what let a route's owning module go unlisted in a real
-consumer, silently producing a wrong `qualifiedName` for that route. Over-including a dependency
-module with no nav entries at all is harmless — it just contributes nothing to the graph.
-
 This task:
 
 - Runs one project-wide PSI scan across every discovered project's raw `.kt` sources to find both
   nodes and edges together, rather than aggregating each module's own precomputed index — a
   route's `entry { ... }` registration, its declaration, and the `navigateTo(...)` call that
   reaches it often all live in different modules, which a single-module scan can't resolve. A
-  route whose declaration genuinely can't be found anywhere in that scan is a hard build failure
-  (naming the route and its `entry<X> { ... }` call site), not a silently wrong guess.
+  route whose declaration genuinely can't be found anywhere in that scan fails the build, naming
+  the route and its `entry<X> { ... }` call site.
 - Also aggregates each discovered project's screenshot index and reference baselines (for
   projects also applying the `io.github.hayatoyagi.compose-preview-toolkit` plugin) — via a real
   Gradle cross-project task dependency, so running the aggregator's task alone triggers every

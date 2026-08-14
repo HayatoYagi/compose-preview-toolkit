@@ -9,16 +9,6 @@ import org.gradle.api.provider.SetProperty
  * Registered under a name distinct from the screenshot-testing plugin's `composePreviewToolkit`
  * extension so a module can apply both plugins at once (e.g. a feature module using both
  * screenshot-test generation and nav-graph extraction) without a naming collision.
- *
- * Notably absent: a `graphModules` property. `generateDebugNavGraphSite` (registered on whichever
- * module applies this plugin, typically the app/aggregator module) always aggregates across this
- * project's own path plus every project dependency resolvable from its `debugCompileClasspath`
- * configuration, transitively — computed automatically by
- * `ComposePreviewToolkitNavGraphPlugin.discoverGraphModules`, with no manual override. A
- * hand-maintained module list is exactly what let a route's owning module go unlisted in a real
- * consumer, silently producing a wrong `qualifiedName` for that route; over-including an unrelated
- * dependency module with no nav entries is harmless (it just contributes nothing), so there's no
- * safe way to under-specify this that's worth exposing as a knob.
  */
 abstract class ComposePreviewToolkitNavGraphExtension {
     /**
