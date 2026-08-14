@@ -29,13 +29,19 @@ import java.util.concurrent.Callable
  * modules, real for a monorepo with many.
  *
  * [Project.discoverGraphModules] reads a dependency project's sources directly, so this plugin
- * isn't functionally required there for its declarations to be found — a dependency module with
- * no Compose Kotlin Gradle subplugin of its own (e.g. one that just declares route types, with no
- * Composable UI) is discovered and scanned correctly either way. The one case where it *should*
- * still be applied: a dependency module that applies its own Compose Kotlin Gradle subplugin
- * (`org.jetbrains.kotlin.plugin.compose`) can otherwise hit a separate, harder Kotlin-Gradle-Plugin
- * classloader mismatch ("The Kotlin Gradle plugin was loaded multiple times in different
- * subprojects") that this isolation does **not** eliminate — root-caused separately in
+ * isn't functionally required on every dependency module for its declarations to be found — a
+ * module reachable via project dependency is discovered and scanned correctly whether or not it
+ * applies this plugin itself.
+ *
+ * Applying a Compose Kotlin Gradle subplugin (`org.jetbrains.kotlin.plugin.compose`) asymmetrically
+ * across subprojects — present on some, absent on others — can trigger a separate Gradle-core
+ * issue: "The Kotlin Gradle plugin was loaded multiple times in different subprojects". This is
+ * unrelated to this plugin's own classpath isolation above and isn't fixed by applying this plugin
+ * more broadly. Gradle caches plugin classloaders by resolved classpath, not by project, so the
+ * fix is to declare every plugin used anywhere in the build once in the root `build.gradle.kts`'s
+ * `plugins {}` block with `apply false`: every subproject's own `plugins {}` request for that same
+ * id+version then resolves as a no-op contribution to its classpath, keeping every subproject's
+ * resolved classpath — and therefore cached ClassLoader — identical. See
  * `HayatoYagi/compose-preview-toolkit#53`.
  *
  * Unlike `ComposePreviewToolkitPlugin`, this plugin needs no KSP-apply-timing `afterEvaluate`
