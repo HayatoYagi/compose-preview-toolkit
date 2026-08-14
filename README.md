@@ -134,7 +134,7 @@ See `ComposePreviewToolkitExtension.kt` for every available property, including 
 ### Composite GitHub Action
 
 ```yaml
-- uses: HayatoYagi/compose-preview-toolkit/.github/actions/update-validate-screenshot-tests@v0.1.0
+- uses: HayatoYagi/compose-preview-toolkit/.github/actions/update-validate-screenshot-tests@v0.3.0
   with:
     github-token: ${{ secrets.GITHUB_TOKEN }}
 ```
@@ -216,7 +216,7 @@ link to that exact line on GitHub — otherwise it's shown as plain, non-interac
 Two modes, selected by the `mode` input:
 
 ```yaml
-- uses: HayatoYagi/compose-preview-toolkit/.github/actions/deploy-nav-graph-site@v0.1.0
+- uses: HayatoYagi/compose-preview-toolkit/.github/actions/deploy-nav-graph-site@v0.3.0
   with:
     site-task: ':app:generateDebugNavGraphSite'
     site-directory: 'app/build/composePreviewToolkit/navGraphSite/debug'
