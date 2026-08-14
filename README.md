@@ -215,11 +215,7 @@ This task:
 Output is a single self-contained `build/composePreviewToolkit/navGraphSite/debug/index.html`: a
 Mermaid.js graph diagram of every node and detected edge (Mermaid loaded from a CDN at page-load
 time — affects only the viewer's browser, not build reproducibility), plus a thumbnail gallery
-(thumbnails embedded as base64 data URIs). See `sample/app`/`sample/feature-a`/`sample/feature-b`
-for a worked example, including `feature-b`'s "Restart from Feature A" button, which demonstrates
-the direct-call edge pattern — or see it live at
-[hayatoyagi.github.io/compose-preview-toolkit](https://hayatoyagi.github.io/compose-preview-toolkit/),
-generated from that same sample on every push to `main`.
+(thumbnails embedded as base64 data URIs). See "Sample App" below for a worked example.
 
 ### Composite GitHub Action
 
@@ -265,6 +261,10 @@ the app level and passed in as a callback (`AppNavHost.kt`/`FeatureANavEntries.k
 `feature-b`'s "Restart from Feature A" button, which calls `navigateTo(FeatureARoute)` directly
 with no callback indirection (`FeatureBNavEntries.kt`). Both are found by the same call-graph
 algorithm — see `nav-graph-psi-analyzer`'s `NavEdgeScanner` kdoc for how.
+
+See it live at
+[hayatoyagi.github.io/compose-preview-toolkit](https://hayatoyagi.github.io/compose-preview-toolkit/),
+generated from this same sample on every push to `main`.
 
 ## Known limitations
 
