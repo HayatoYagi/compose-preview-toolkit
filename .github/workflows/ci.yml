@@ -21,11 +21,10 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
+      # Don't pin an explicit ref (e.g. github.head_ref) here: on pull_request: closed, that
+      # branch may already be deleted (this repo auto-deletes on merge), and checkout would fail.
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          ref: ${{ github.head_ref || github.ref_name }}
-          fetch-depth: 0
 
       # Everything below except the final deploy step is skipped when a PR closes — a closed PR
       # only needs its preview torn down (which deploy-nav-graph-site's own `mode: 'github-pages'`
