@@ -87,15 +87,6 @@ The plugin applies `com.android.compose.screenshot` and `com.google.devtools.ksp
 by default adds `io.github.hayatoyagi:compose-preview-toolkit-annotations` so
 `@ScreenshotPreview` is available.
 
-In a multi-module project, declare this plugin (like every other plugin) once in the root
-`build.gradle.kts`'s `plugins {}` block with `apply false`, then apply it by bare id (no version)
-in each module that needs it — [Gradle's own recommended pattern](https://docs.gradle.org/current/userguide/plugins.html#sec:subprojects_plugins_dsl),
-not something specific to this plugin. Beyond being the standard approach, skipping it is also
-what triggers a known Gradle/Kotlin-Gradle-plugin issue, "The Kotlin Gradle plugin was loaded
-multiple times in different subprojects", whenever subprojects apply Compose Kotlin Gradle
-subplugins asymmetrically — see `nav-graph-gradle-plugin`'s kdoc for why, and "Nav Graph" below for
-the case where that's most likely to bite.
-
 ## Quick Start
 
 1. Write a normal `@Preview` composable.
@@ -167,10 +158,11 @@ plugins {
 ```
 
 Only needs to be applied where you run `generateDebugNavGraphSite` — a dependency module is
-discovered and scanned via its dependents without applying this plugin there too. Applying it only
-on some subprojects like this is exactly the asymmetric case called out in
-[Installation](#installation) above: make sure every plugin in the build, including this one, is
-declared once in the root `build.gradle.kts` with `apply false`.
+discovered and scanned via its dependents without applying this plugin there too. If that leads to
+a Gradle warning about "The Kotlin Gradle plugin was loaded multiple times in different
+subprojects", it means some subproject in your build isn't declared the standard way — declare
+every plugin used anywhere in the build once in the root `build.gradle.kts` with `apply false`
+(see `nav-graph-gradle-plugin`'s kdoc for why this fixes it).
 
 Edge detection is best-effort and name-based, not type resolution: ambiguous callee names and calls
 beyond the configured depth are dropped with a warning rather than guessed, and there's no
