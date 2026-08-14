@@ -4,7 +4,6 @@ import io.github.hayatoyagi.composepreviewtoolkit.navgraph.psi.NavEdge
 import io.github.hayatoyagi.composepreviewtoolkit.navgraph.psi.NavNode
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
-import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import java.io.File
@@ -63,11 +62,28 @@ class NavGraphSiteTest {
 
         val matched = matchScreenshotEntry(node, screenshotEntries, setOf("Destination", "Route"))
 
-        assertEquals(screenshotEntries.single(), matched)
+        assertEquals(screenshotEntries, matched)
     }
 
     @Test
-    fun `matchScreenshotEntry returns null when nothing matches`() {
+    fun `matchScreenshotEntry returns every matching wrapper, sorted by wrapperName`() {
+        val screenshotEntries = listOf(
+            ScreenshotIndexEntry("com.example.home", "HomeScreenPreview_Screenshot", "com.example.home.preview1"),
+            ScreenshotIndexEntry("com.example.home", "HomeDetailScreenPreview_Screenshot", "com.example.home.preview2"),
+            ScreenshotIndexEntry("com.example.other", "OtherScreen_Screenshot", "com.example.other.preview"),
+        )
+        val node = NavNode("com.example.home", "HomeRoute", "com.example.home.HomeRoute")
+
+        val matched = matchScreenshotEntry(node, screenshotEntries, setOf("Destination", "Route"))
+
+        assertEquals(
+            listOf("HomeDetailScreenPreview_Screenshot", "HomeScreenPreview_Screenshot"),
+            matched.map { it.wrapperName },
+        )
+    }
+
+    @Test
+    fun `matchScreenshotEntry returns an empty list when nothing matches`() {
         val screenshotEntries = listOf(
             ScreenshotIndexEntry("com.example", "GreetingScreenPreview_Screenshot", "com.example.GreetingScreenPreview"),
         )
@@ -75,7 +91,7 @@ class NavGraphSiteTest {
 
         val matched = matchScreenshotEntry(node, screenshotEntries, setOf("Destination", "Route"))
 
-        assertNull(matched)
+        assertTrue(matched.isEmpty())
     }
 
     @Test
@@ -88,31 +104,37 @@ class NavGraphSiteTest {
 
         val matched = matchScreenshotEntry(node, screenshotEntries, setOf("Route"))
 
-        assertNull(matched)
+        assertTrue(matched.isEmpty())
     }
 
     @Test
-    fun `findThumbnailFile picks the lexicographically-first prefix match`() {
+    fun `findThumbnailFiles returns every prefix match sorted by file name`() {
         val files = listOf(
             File("FeatureAScreen_Screenshot_Light_abc123_0.png"),
             File("FeatureAScreen_Screenshot_Dark_def456_0.png"),
             File("OtherWrapper_Screenshot_Light_zzz999_0.png"),
         )
 
-        val thumbnail = findThumbnailFile("FeatureAScreen_Screenshot", files)
+        val thumbnails = findThumbnailFiles("FeatureAScreen_Screenshot", files)
 
-        assertEquals(File("FeatureAScreen_Screenshot_Dark_def456_0.png"), thumbnail)
+        assertEquals(
+            listOf(
+                File("FeatureAScreen_Screenshot_Dark_def456_0.png"),
+                File("FeatureAScreen_Screenshot_Light_abc123_0.png"),
+            ),
+            thumbnails,
+        )
     }
 
     @Test
-    fun `findThumbnailFile returns null when no file matches the wrapper prefix`() {
+    fun `findThumbnailFiles returns an empty list when no file matches the wrapper prefix`() {
         val files = listOf(File("OtherWrapper_Screenshot_Light_zzz999_0.png"))
 
-        assertNull(findThumbnailFile("FeatureAScreen_Screenshot", files))
+        assertTrue(findThumbnailFiles("FeatureAScreen_Screenshot", files).isEmpty())
     }
 
     @Test
-    fun `buildGalleryEntries pairs a matched node with its thumbnail and leaves others unmatched`() {
+    fun `buildGalleryEntries pairs a matched node with all its thumbnails and leaves others unmatched`() {
         val nodes = listOf(
             NavNode("com.example", "HomeRoute", "com.example.HomeRoute"),
             NavNode("com.example.featurea", "FeatureARoute", "com.example.featurea.FeatureARoute"),
@@ -120,20 +142,45 @@ class NavGraphSiteTest {
         val screenshotEntries = listOf(
             ScreenshotIndexEntry("com.example.featurea", "FeatureAScreen_Screenshot", "com.example.featurea.preview"),
         )
-        val thumbnailFile = File("FeatureAScreen_Screenshot_Light_abc123_0.png")
+        val lightFile = File("FeatureAScreen_Screenshot_Light_abc123_0.png")
+        val darkFile = File("FeatureAScreen_Screenshot_Dark_def456_0.png")
 
         val entries = buildGalleryEntries(
             nodes = nodes,
             screenshotEntries = screenshotEntries,
-            referenceImages = listOf(thumbnailFile),
+            referenceImages = listOf(lightFile, darkFile),
             suffixesToStrip = setOf("Destination", "Route"),
         )
 
         assertEquals(2, entries.size)
         val home = entries.single { it.node.simpleName == "HomeRoute" }
         val featureA = entries.single { it.node.simpleName == "FeatureARoute" }
-        assertNull(home.thumbnail)
-        assertEquals(thumbnailFile, featureA.thumbnail)
+        assertTrue(home.thumbnails.isEmpty())
+        assertEquals(listOf(darkFile, lightFile), featureA.thumbnails)
+    }
+
+    @Test
+    fun `buildGalleryEntries aggregates thumbnails across multiple matched wrappers for one node`() {
+        val nodes = listOf(NavNode("com.example.home", "HomeRoute", "com.example.home.HomeRoute"))
+        val screenshotEntries = listOf(
+            ScreenshotIndexEntry("com.example.home", "HomeScreenPreview_Screenshot", "com.example.home.preview1"),
+            ScreenshotIndexEntry("com.example.home", "HomeDetailScreenPreview_Screenshot", "com.example.home.preview2"),
+        )
+        val homeLight = File("HomeScreenPreview_Screenshot_Light_aaa111_0.png")
+        val homeDark = File("HomeScreenPreview_Screenshot_Dark_bbb222_0.png")
+        val homeDetail = File("HomeDetailScreenPreview_Screenshot_ccc333_0.png")
+
+        val entries = buildGalleryEntries(
+            nodes = nodes,
+            screenshotEntries = screenshotEntries,
+            referenceImages = listOf(homeLight, homeDark, homeDetail),
+            suffixesToStrip = setOf("Route"),
+        )
+
+        val home = entries.single()
+        // All three PNGs across both matched wrappers show up, sorted by file name
+        // ("HomeDetail..." < "HomeScreenPreview_Screenshot_Dark..." < "...Light...").
+        assertEquals(listOf(homeDetail, homeDark, homeLight), home.thumbnails)
     }
 
     @Test
@@ -150,21 +197,19 @@ class NavGraphSiteTest {
     }
 
     @Test
-    fun `buildGallerySiteHtml renders a card per route and a placeholder for unmatched thumbnails`() {
-        val cards = listOf(
-            GalleryCard(
-                qualifiedName = "com.example.HomeRoute",
-                simpleName = "HomeRoute",
-                thumbnailDataUri = null,
-            ),
-            GalleryCard(
+    fun `buildGallerySiteHtml renders every node's data and a placeholder-capable modal for unmatched thumbnails`() {
+        val nodes = listOf(
+            GalleryNode(qualifiedName = "com.example.HomeRoute", simpleName = "HomeRoute", thumbnails = emptyList()),
+            GalleryNode(
                 qualifiedName = "com.example.featurea.FeatureARoute",
                 simpleName = "FeatureARoute",
-                thumbnailDataUri = "data:image/png;base64,AAAA",
+                thumbnails = listOf(
+                    GalleryThumbnail(label = "FeatureARoute_Screenshot_0.png", dataUri = "data:image/png;base64,AAAA"),
+                ),
             ),
         )
 
-        val html = buildGallerySiteHtml(cards, mermaidGraph = "graph TD;\n")
+        val html = buildGallerySiteHtml(nodes, mermaidGraph = "graph TD;\n")
 
         assertTrue(html.contains("HomeRoute"))
         assertTrue(html.contains("com.example.HomeRoute"))
@@ -172,35 +217,70 @@ class NavGraphSiteTest {
         assertTrue(html.contains("com.example.featurea.FeatureARoute"))
         assertTrue(html.contains("No screenshot"))
         assertTrue(html.contains("data:image/png;base64,AAAA"))
+        assertTrue(html.contains("FeatureARoute_Screenshot_0.png"))
+        // The old separate grid section is gone.
+        assertFalse(html.contains("<h2>Screenshots</h2>"))
+        assertFalse(html.contains("class=\"grid\""))
     }
 
     @Test
-    fun `buildGallerySiteHtml escapes route names`() {
-        val cards = listOf(
-            GalleryCard(qualifiedName = "com.example.<Weird>", simpleName = "<Weird>", thumbnailDataUri = null),
+    fun `buildGallerySiteHtml embeds every thumbnail of a multi-match node in the click data, not just the representative one`() {
+        val nodes = listOf(
+            GalleryNode(
+                qualifiedName = "com.example.home.HomeRoute",
+                simpleName = "HomeRoute",
+                thumbnails = listOf(
+                    GalleryThumbnail(label = "HomeScreenPreview_Screenshot_Dark_bbb222_0.png", dataUri = "data:image/png;base64,DARK"),
+                    GalleryThumbnail(label = "HomeScreenPreview_Screenshot_Light_aaa111_0.png", dataUri = "data:image/png;base64,LIGHT"),
+                ),
+            ),
         )
 
-        val html = buildGallerySiteHtml(cards, mermaidGraph = "graph TD;\n")
+        val html = buildGallerySiteHtml(nodes, mermaidGraph = "graph TD;\nn0[\"HomeRoute\"];\n")
 
-        assertFalse(html.contains("<Weird>"))
-        assertTrue(html.contains("&lt;Weird&gt;"))
+        assertTrue(html.contains("data:image/png;base64,DARK"))
+        assertTrue(html.contains("data:image/png;base64,LIGHT"))
+        assertTrue(html.contains("HomeScreenPreview_Screenshot_Dark_bbb222_0.png"))
+        assertTrue(html.contains("HomeScreenPreview_Screenshot_Light_aaa111_0.png"))
     }
 
     @Test
-    fun `buildGallerySiteHtml embeds the mermaid CDN script and the given graph definition`() {
+    fun `buildGallerySiteHtml escapes a double quote in a route name so it can't break out of the embedded JS string literal`() {
+        val nodes = listOf(
+            GalleryNode(qualifiedName = "com.example.Weird\"Route", simpleName = "Weird\"Route", thumbnails = emptyList()),
+        )
+
+        val html = buildGallerySiteHtml(nodes, mermaidGraph = "graph TD;\n")
+
+        assertTrue(html.contains("Weird\\\"Route"))
+        assertFalse(html.contains("\"simpleName\":\"Weird\"Route\""))
+    }
+
+    @Test
+    fun `buildGallerySiteHtml embeds the mermaid CDN script, a raised maxTextSize, and the given graph definition`() {
         val html = buildGallerySiteHtml(emptyList(), mermaidGraph = "graph TD;\nn0[\"Home\"];\n")
 
         assertTrue(html.contains("mermaid"))
         assertTrue(html.contains("cdn.jsdelivr.net"))
+        assertTrue(html.contains("securityLevel: \"loose\""))
+        assertTrue(html.contains("maxTextSize"))
         assertTrue(html.contains("graph TD;"))
         assertTrue(html.contains("n0[\"Home\"];"))
     }
 
     @Test
+    fun `buildGallerySiteHtml wires a click-to-reveal modal container and handler`() {
+        val html = buildGallerySiteHtml(emptyList(), mermaidGraph = "graph TD;\n")
+
+        assertTrue(html.contains("cpt-modal-backdrop"))
+        assertTrue(html.contains("function cptShowScreenshots(nodeId)"))
+    }
+
+    @Test
     fun `buildMermaidGraph assigns positional ids and keeps qualified names only in labels`() {
         val nodes = listOf(
-            NavNode("com.example", "HomeRoute", "com.example.HomeRoute"),
-            NavNode("com.example.featurea", "FeatureARoute", "com.example.featurea.FeatureARoute"),
+            GalleryNode("com.example.HomeRoute", "HomeRoute", emptyList()),
+            GalleryNode("com.example.featurea.FeatureARoute", "FeatureARoute", emptyList()),
         )
         val edges = listOf(NavEdge("com.example.HomeRoute", "com.example.featurea.FeatureARoute"))
 
@@ -218,7 +298,7 @@ class NavGraphSiteTest {
 
     @Test
     fun `buildMermaidGraph renders a node with no outgoing or incoming edges`() {
-        val nodes = listOf(NavNode("com.example", "TerminalRoute", "com.example.TerminalRoute"))
+        val nodes = listOf(GalleryNode("com.example.TerminalRoute", "TerminalRoute", emptyList()))
 
         val graph = buildMermaidGraph(nodes, emptyList())
 
@@ -228,8 +308,8 @@ class NavGraphSiteTest {
     @Test
     fun `buildMermaidGraph renders a real cycle (A to B and B to A) as two edge lines, not a crash or dedup`() {
         val nodes = listOf(
-            NavNode("com.example.featurea", "FeatureARoute", "com.example.featurea.FeatureARoute"),
-            NavNode("com.example.featureb", "FeatureBRoute", "com.example.featureb.FeatureBRoute"),
+            GalleryNode("com.example.featurea.FeatureARoute", "FeatureARoute", emptyList()),
+            GalleryNode("com.example.featureb.FeatureBRoute", "FeatureBRoute", emptyList()),
         )
         val edges = listOf(
             NavEdge("com.example.featurea.FeatureARoute", "com.example.featureb.FeatureBRoute"),
@@ -244,7 +324,7 @@ class NavGraphSiteTest {
 
     @Test
     fun `buildMermaidGraph drops an edge referencing a route absent from nodes instead of emitting a dangling id`() {
-        val nodes = listOf(NavNode("com.example", "HomeRoute", "com.example.HomeRoute"))
+        val nodes = listOf(GalleryNode("com.example.HomeRoute", "HomeRoute", emptyList()))
         val edges = listOf(NavEdge("com.example.HomeRoute", "com.example.Unknown"))
 
         val graph = buildMermaidGraph(nodes, edges)
@@ -254,7 +334,7 @@ class NavGraphSiteTest {
 
     @Test
     fun `buildMermaidGraph escapes a quote in a label without breaking mermaid's quoted-string syntax`() {
-        val nodes = listOf(NavNode("com.example", "Weird\"Route", "com.example.Weird\"Route"))
+        val nodes = listOf(GalleryNode("com.example.Weird\"Route", "Weird\"Route", emptyList()))
 
         val graph = buildMermaidGraph(nodes, emptyList())
 
@@ -263,11 +343,48 @@ class NavGraphSiteTest {
 
     @Test
     fun `buildMermaidGraph html-escapes angle brackets and ampersands in a label`() {
-        val nodes = listOf(NavNode("com.example", "<Weird&Route>", "com.example.<Weird&Route>"))
+        val nodes = listOf(GalleryNode("com.example.<Weird&Route>", "<Weird&Route>", emptyList()))
 
         val graph = buildMermaidGraph(nodes, emptyList())
 
         assertFalse(graph.contains("<Weird"))
         assertTrue(graph.contains("&lt;Weird&amp;Route&gt;"))
+    }
+
+    @Test
+    fun `buildMermaidGraph embeds the representative (lexicographically-first) thumbnail as an image-shape node`() {
+        val nodes = listOf(
+            GalleryNode(
+                qualifiedName = "com.example.home.HomeRoute",
+                simpleName = "HomeRoute",
+                thumbnails = listOf(
+                    GalleryThumbnail(label = "HomeScreenPreview_Screenshot_Dark_bbb222_0.png", dataUri = "data:image/png;base64,DARK"),
+                    GalleryThumbnail(label = "HomeScreenPreview_Screenshot_Light_aaa111_0.png", dataUri = "data:image/png;base64,LIGHT"),
+                ),
+            ),
+        )
+
+        val graph = buildMermaidGraph(nodes, emptyList())
+
+        assertTrue(graph.contains("n0@{ img: \"data:image/png;base64,DARK\""))
+        assertFalse(graph.contains("data:image/png;base64,LIGHT"))
+        assertTrue(graph.contains("label: \"HomeRoute\""))
+    }
+
+    @Test
+    fun `buildMermaidGraph binds a click callback to every node, including unmatched ones`() {
+        val nodes = listOf(
+            GalleryNode("com.example.HomeRoute", "HomeRoute", emptyList()),
+            GalleryNode(
+                "com.example.featurea.FeatureARoute",
+                "FeatureARoute",
+                listOf(GalleryThumbnail("FeatureARoute_Screenshot_0.png", "data:image/png;base64,AAAA")),
+            ),
+        )
+
+        val graph = buildMermaidGraph(nodes, emptyList())
+
+        assertTrue(graph.contains("click n0 call cptShowScreenshots();"))
+        assertTrue(graph.contains("click n1 call cptShowScreenshots();"))
     }
 }
