@@ -34,7 +34,7 @@ jobs:
           fetch-depth: 0
 
       - name: Update baselines and validate
-        uses: HayatoYagi/compose-preview-toolkit/.github/actions/update-validate-screenshot-tests@v0.1.0
+        uses: HayatoYagi/compose-preview-toolkit/.github/actions/update-validate-screenshot-tests@v0.3.0
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           working-directory: sample

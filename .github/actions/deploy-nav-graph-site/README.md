@@ -67,12 +67,16 @@ jobs:
       - uses: actions/checkout@v4
 
       # Skipped when the PR closes — nothing here is needed to tear down a preview. Swap for
-      # whatever step regenerates your project's baselines.
+      # whatever step regenerates your project's baselines; this repo's own
+      # update-validate-screenshot-tests is shown here as a concrete, runnable example.
       - name: Update screenshot baselines
         if: github.event_name != 'pull_request' || github.event.action != 'closed'
-        uses: your-org/your-repo/.github/actions/update-screenshot-baselines@main
+        uses: HayatoYagi/compose-preview-toolkit/.github/actions/update-validate-screenshot-tests@v0.3.0
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          skip-validate: 'true'
 
-      - uses: HayatoYagi/compose-preview-toolkit/.github/actions/deploy-nav-graph-site@v0.1.0
+      - uses: HayatoYagi/compose-preview-toolkit/.github/actions/deploy-nav-graph-site@v0.3.0
         with:
           site-task: ':app:generateDebugNavGraphSite'
           site-directory: 'app/build/composePreviewToolkit/navGraphSite/debug'
