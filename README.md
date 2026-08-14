@@ -150,7 +150,7 @@ into the plugin above, since it pulls in a heavy embedded-Kotlin-compiler depend
 Navigation3 users need. It statically scans a module's
 own `src/main/kotlin` via Kotlin PSI (no type resolution) for Navigation3 `entry<Route> { ... }`
 registrations (nodes) and `navigateTo`/`navigate`-shaped calls reachable from each one via a
-bounded-depth call-graph search (edges), then writes a node + edge index:
+bounded-depth call-graph search (edges):
 
 ```kotlin
 // feature module's build.gradle.kts
@@ -163,20 +163,12 @@ plugins {
 ./gradlew generateDebugNavGraph
 ```
 
-Writes a node + edge index under `build/generated/composePreviewToolkit/navGraph/debug/` (scoped
-to that module's own sources) — an intermediate format consumed by the site-generation step below;
-each node also records the source location of its `entry<X> { ... }` registration call site, used
-later for the gallery site's "view source" link.
-
-Edge detection handles two navigation-wiring shapes with one algorithm: a callback threaded through
-intermediate composables before finally being invoked far from where it's declared (e.g. a feature
-module's `onProceedClick`, only actually invoked at an app-level `NavHost`'s call site), and a
-direct `navigateTo(...)` call with no callback indirection. Analysis is best-effort and name-based,
-not type resolution: ambiguous callee names and calls beyond the configured depth are dropped with
-a warning rather than guessed, and there's no escape-hatch annotation for gaps — if the scanner
-misses something real, the scanner should improve rather than asking you to annotate your
-navigation code. Configure via `composePreviewToolkitNavGraph { ... }`'s `entryFunctionNames`,
-`navigateCallNames`, and `callGraphResolutionDepth`.
+Edge detection is best-effort and name-based, not type resolution: ambiguous callee names and calls
+beyond the configured depth are dropped with a warning rather than guessed, and there's no
+escape-hatch annotation for gaps — if the scanner misses something real, the scanner should improve
+rather than asking you to annotate your navigation code. Configure via
+`composePreviewToolkitNavGraph { ... }`'s `entryFunctionNames`, `navigateCallNames`, and
+`callGraphResolutionDepth`.
 
 ### Gallery site (nodes + edges + screenshots)
 
