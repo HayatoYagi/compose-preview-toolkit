@@ -56,10 +56,9 @@ Tested with:
   applies for you.
 - Kotlin 2.4.0+ / KSP 2.3.9+
 
-Untested on older AGP/Gradle combinations. This plugin wires generated sources into AGP's
-`screenshotTest` source set via reflection (see `ComposePreviewToolkitPlugin.kt`) because AGP
-doesn't yet expose a stable API for it, so behavior on versions outside the above isn't
-guaranteed.
+This plugin wires generated sources into AGP's `screenshotTest` source set via reflection (see
+`ComposePreviewToolkitPlugin.kt`) because AGP doesn't yet expose a stable API for it — so behavior
+on versions outside the above isn't guaranteed.
 
 ## Installation
 
@@ -146,12 +145,12 @@ for every input.
 
 ## Nav Graph (experimental)
 
-A **separate** plugin id, `io.github.hayatoyagi.compose-preview-toolkit.navgraph` — deliberately
-not bundled into the plugin above, since it pulls in a heavy embedded-Kotlin-compiler dependency
-that only Navigation3 users need (see `nav-graph-gradle-plugin`'s kdoc for why). Statically scans a
-module's own `src/main/kotlin` via Kotlin PSI (no type resolution) for Navigation3
-`entry<Route> { ... }` registrations (nodes) and `navigateTo`/`navigate`-shaped calls reachable
-from each one via a bounded-depth call-graph search (edges), and writes a node + edge index:
+A **separate** plugin id, `io.github.hayatoyagi.compose-preview-toolkit.navgraph` — not bundled
+into the plugin above, since it pulls in a heavy embedded-Kotlin-compiler dependency that only
+Navigation3 users need (see `nav-graph-gradle-plugin` kdoc for why). It statically scans a module's
+own `src/main/kotlin` via Kotlin PSI (no type resolution) for Navigation3 `entry<Route> { ... }`
+registrations (nodes) and `navigateTo`/`navigate`-shaped calls reachable from each one via a
+bounded-depth call-graph search (edges), then writes a node + edge index:
 
 ```kotlin
 // feature module's build.gradle.kts
@@ -164,19 +163,21 @@ plugins {
 ./gradlew generateDebugNavGraph
 ```
 
-writes `build/generated/composePreviewToolkit/navGraph/debug/ComposePreviewToolkitNavNodeIndex.txt`
-(tab-separated `packageName\tsimpleName\tqualifiedName`) and `...NavEdgeIndex.txt` (tab-separated
-`sourceRouteQualifiedName\ttargetRouteQualifiedName`), scoped to that module's own sources only.
-Edge detection handles two navigation-wiring shapes through one algorithm, with no special-casing:
-a callback threaded through intermediate composables before finally being invoked far from where
-it's declared (e.g. a feature module's `onProceedClick`, only actually invoked at an app-level
-`NavHost`'s call site), and a direct `navigateTo(...)` call with no callback indirection at all.
-This is deliberately best-effort, name-based analysis, not type resolution: ambiguous callee names
-and calls beyond the configured depth are dropped with a warning rather than guessed, and there is
-no escape-hatch annotation for cases the scanner misses — if a real gap shows up, the scanner
-itself should improve rather than asking you to annotate your real navigation code. Configure via
-the `composePreviewToolkitNavGraph { ... }` extension's `entryFunctionNames`, `navigateCallNames`,
-and `callGraphResolutionDepth`.
+Writes, under `build/generated/composePreviewToolkit/navGraph/debug/` (scoped to that module's own
+sources):
+
+- `ComposePreviewToolkitNavNodeIndex.txt` — tab-separated `packageName\tsimpleName\tqualifiedName`
+- `ComposePreviewToolkitNavEdgeIndex.txt` — tab-separated `sourceRouteQualifiedName\ttargetRouteQualifiedName`
+
+Edge detection handles two navigation-wiring shapes with one algorithm: a callback threaded through
+intermediate composables before finally being invoked far from where it's declared (e.g. a feature
+module's `onProceedClick`, only actually invoked at an app-level `NavHost`'s call site), and a
+direct `navigateTo(...)` call with no callback indirection. Analysis is best-effort and name-based,
+not type resolution: ambiguous callee names and calls beyond the configured depth are dropped with
+a warning rather than guessed, and there's no escape-hatch annotation for gaps — if the scanner
+misses something real, the scanner should improve rather than asking you to annotate your
+navigation code. Configure via `composePreviewToolkitNavGraph { ... }`'s `entryFunctionNames`,
+`navigateCallNames`, and `callGraphResolutionDepth`.
 
 ### Gallery site (nodes + edges + screenshots)
 
@@ -195,26 +196,28 @@ composePreviewToolkitNavGraph {
 ./gradlew :app:generateDebugNavGraphSite
 ```
 
-This aggregates each `graphModules` project's node index and (if that project also applies the
-`io.github.hayatoyagi.compose-preview-toolkit` plugin above) its `ComposePreviewToolkitScreenshotIndex*.txt` + `src/screenshotTestDebug/reference/**/*.png`
-baselines, real Gradle cross-project task dependencies included — running the aggregator's task
-alone is enough to trigger every graph module's own `generateDebugNavGraph`/`kspDebugKotlin` first,
-no manual ordering required. Edges are additionally (re-)scanned project-wide across every
-`graphModules` project's raw sources in this same task, rather than purely aggregated from each
-module's own edge index — a route's `entry { ... }` registration and the `navigateTo(...)` call
-site that reaches it routinely live in different modules, which a single-module scan can't resolve
-on its own. Each node is best-effort paired with a screenshot thumbnail by a naming heuristic:
-strip a configurable suffix (`routeNameSuffixesToStrip`, default `["Destination", "Route"]`) from
-the route's simple name, then case-insensitively substring-match the remainder against the
-screenshot wrapper name. Unmatched routes render as thumbnail-less cards — not an error, the
-expected outcome for some routes.
+This task:
 
-Output is a single self-contained `build/composePreviewToolkit/navGraphSite/debug/index.html` with
-two sections: a Mermaid.js graph diagram of every node and detected edge (Mermaid itself loaded
-from a CDN at page-load time — this affects only the viewer's browser, not build reproducibility),
-and the thumbnail gallery (thumbnails embedded as base64 data URIs, no separate PNG files to keep
-in sync). See `sample/app`/`sample/feature-a`/`sample/feature-b` for a worked example — including
-`feature-b`'s "Restart from Feature A" button, which demonstrates the direct-call edge pattern.
+- Aggregates each `graphModules` project's node index, plus (for projects also applying the
+  `io.github.hayatoyagi.compose-preview-toolkit` plugin) their
+  `ComposePreviewToolkitScreenshotIndex*.txt` + `src/screenshotTestDebug/reference/**/*.png`
+  baselines — via real Gradle cross-project task dependencies, so running the aggregator's task
+  alone triggers every graph module's own `generateDebugNavGraph`/`kspDebugKotlin` first.
+- Re-scans edges project-wide across every `graphModules` project's raw sources, rather than
+  purely aggregating each module's own edge index — a route's `entry { ... }` registration and the
+  `navigateTo(...)` call that reaches it often live in different modules, which a single-module
+  scan can't resolve.
+- Pairs each node with a screenshot thumbnail by a best-effort naming heuristic: strip a
+  configurable suffix (`routeNameSuffixesToStrip`, default `["Destination", "Route"]`) from the
+  route's simple name, then case-insensitively substring-match the remainder against the
+  screenshot wrapper name. Unmatched routes render as thumbnail-less cards — not an error.
+
+Output is a single self-contained `build/composePreviewToolkit/navGraphSite/debug/index.html`: a
+Mermaid.js graph diagram of every node and detected edge (Mermaid loaded from a CDN at page-load
+time — affects only the viewer's browser, not build reproducibility), plus a thumbnail gallery
+(thumbnails embedded as base64 data URIs). See `sample/app`/`sample/feature-a`/`sample/feature-b`
+for a worked example, including `feature-b`'s "Restart from Feature A" button, which demonstrates
+the direct-call edge pattern.
 
 ### Composite GitHub Action
 
@@ -231,13 +234,11 @@ Two modes, selected by the `mode` input:
 - **`mode: 'build'`** (the default): only runs the Gradle task — no Pages permissions needed,
   useful for build-only CI dogfooding.
 - **`mode: 'github-pages'`**: the full managed GitHub-Pages-with-previews experience from one
-  call, branching internally on the triggering event so the caller doesn't hand-assemble multiple
-  steps: on `push` it deploys `site-directory` as the persisted main site (branch-based deploy to
-  `pr-preview-branch`'s root); on `pull_request` (`opened`/`reopened`/`synchronize`) it deploys a
-  live per-PR preview via [`rossjrw/pr-preview-action`](https://github.com/rossjrw/pr-preview-action)
-  with a sticky PR comment; on `pull_request: closed` it tears that preview down. Both directions
-  share the same branch, so it just requires repo **Settings → Pages → Source** = **Deploy from
-  branch** pointed at `pr-preview-branch`.
+  call, branching internally on the triggering event: `push` deploys `site-directory` as the
+  persisted main site; `pull_request` (`opened`/`reopened`/`synchronize`) deploys a live per-PR
+  preview with a sticky PR comment; `pull_request: closed` tears that preview down. Both share the
+  same branch — requires repo **Settings → Pages → Source** = **Deploy from branch** pointed at
+  `pr-preview-branch`.
 
 This repo's own `ci.yml` (plus
 [`nav-graph-pr-preview-teardown.yml`](.github/workflows/nav-graph-pr-preview-teardown.yml)) is a
@@ -257,23 +258,16 @@ it applies the plugin(s) exactly like a real consumer would (`id("io.github.haya
 version "<version>"`), and that version is always ahead of whatever's actually published while
 this repo is under active development.
 
-`sample/app` is a small Navigation3 app wiring together `sample/feature-a` and `sample/feature-b`
-(each a separate feature module), demonstrating the nav-graph plugin's node extraction and gallery
-site generation (see "Nav Graph" above) alongside the `io.github.hayatoyagi.compose-preview-toolkit`
-plugin's screenshot-test generation. Every module — `app`, `feature-a`, and `feature-b` — applies
-both the screenshot-testing plugin and the navgraph plugin, so in the generated gallery all three
-routes get a real thumbnail:
-`HomeRoute` from `HomeScreen`'s `@ScreenshotPreview`-annotated `HomeScreenPreview`, `FeatureARoute`
-from `FeatureAScreen`'s `FeatureAScreenPreview`, and `FeatureBRoute` from `FeatureBScreen`'s
-`FeatureBScreenPreview` — each naming-matched after stripping the `Route` suffix.
+`sample/app` is a Navigation3 app wiring together `sample/feature-a` and `sample/feature-b`,
+demonstrating the nav-graph plugin's node extraction and gallery site generation (see "Nav Graph"
+above) alongside the screenshot-test plugin. All three modules apply both plugins, so every route
+gets a real thumbnail in the generated gallery.
 
-`feature-b` also demonstrates the second of the two navigation-wiring shapes the edge detector
-(`NavEdgeScanner`) supports: its "Restart from Feature A" button calls `navigateTo(FeatureARoute)`
-directly inside `featureBNavEntries`/`FeatureBNavEntries.kt`, with no callback parameter threaded
-up to `sample/app` for that particular edge — unlike `feature-a`'s `onProceedClick`, which is
-written at the app level and passed in as a callback (see `AppNavHost.kt`/`FeatureANavEntries.kt`).
-Both shapes are found by the exact same call-graph algorithm; see `nav-graph-psi-analyzer`'s
-`NavEdgeScanner` kdoc for how.
+The sample also demonstrates both edge-detection shapes: `feature-a`'s `onProceedClick`, written at
+the app level and passed in as a callback (`AppNavHost.kt`/`FeatureANavEntries.kt`), and
+`feature-b`'s "Restart from Feature A" button, which calls `navigateTo(FeatureARoute)` directly
+with no callback indirection (`FeatureBNavEntries.kt`). Both are found by the same call-graph
+algorithm — see `nav-graph-psi-analyzer`'s `NavEdgeScanner` kdoc for how.
 
 ## Known limitations
 

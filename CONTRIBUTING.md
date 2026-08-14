@@ -21,14 +21,12 @@ cd sample
 Re-run the `publishToMavenLocal` step after any change to `annotations`, `ksp-processor`,
 `gradle-plugin`, `nav-graph-psi-analyzer`, or `nav-graph-gradle-plugin` to pick it up in `sample`.
 
-`sample/` is itself a multi-module build: `sample/app` (the Nav3 host, applies both the
-`io.github.hayatoyagi.compose-preview-toolkit` screenshot-test plugin and the navgraph plugin),
-`sample/feature-a`, and `sample/feature-b` (each apply only the navgraph plugin — see
-`sample/app/src/main/kotlin/.../AppNavHost.kt` for how they're wired together).
-`generateDebugNavGraph` writes each module's own `ComposePreviewToolkitNavNodeIndex.txt` under that
-module's `build/generated/composePreviewToolkit/navGraph/debug/` — module-local by design.
-Cross-module aggregation into a single graph is handled separately by `generateDebugNavGraphSite`
-(see README.md's "Gallery site" subsection under "Nav Graph").
+`sample/` is itself multi-module: `sample/app` (Nav3 host, applies both the screenshot-test and
+navgraph plugins), `sample/feature-a`, and `sample/feature-b` (navgraph plugin only — see
+`AppNavHost.kt` for how they're wired). `generateDebugNavGraph` writes each module's own node
+index under that module's `build/generated/composePreviewToolkit/navGraph/debug/`, module-local by
+design; cross-module aggregation is handled separately by `generateDebugNavGraphSite` (see
+README.md's "Gallery site" subsection).
 
 ## Opening a PR
 
@@ -80,8 +78,8 @@ gh workflow run publish.yml -f target=maven-central -f ref=vX.Y.Z
 ```
 
 (Re-running the failed job directly from the **Tag Release** run's page looks like it should
-work too, but in practice got stuck permanently in a "queued" state with zero jobs ever
-scheduled when we hit this for v0.1.0 — use the manual dispatch above instead.)
+work too, but gets stuck permanently in a "queued" state with zero jobs ever scheduled — use the
+manual dispatch above instead.)
 
 ### Required repository configuration
 
