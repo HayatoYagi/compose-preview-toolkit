@@ -17,6 +17,14 @@ import org.gradle.api.artifacts.component.ProjectComponentIdentifier
  * land on the classpath of a consumer who only wants screenshot-test generation. This plugin
  * doesn't require that other plugin to also be applied — a module can use either, both, or neither.
  *
+ * Apply this plugin on every module you want included in the graph, even though
+ * [Project.discoverGraphModules]/[Project.wireGraphModule] read a dependency project's sources
+ * directly and don't themselves require it applied there: `kotlin-compiler-embeddable` needs to be
+ * present on every Kotlin/Compose module's plugin classpath *uniformly*, or Gradle ends up
+ * resolving the Kotlin Gradle plugin via mismatched classloaders across modules (a real, reproduced
+ * failure mode — Gradle logs "The Kotlin Gradle plugin was loaded multiple times in different
+ * subprojects, which is not supported and may break the build").
+ *
  * Unlike `ComposePreviewToolkitPlugin`, this plugin needs no KSP-apply-timing `afterEvaluate`
  * gymnastics: there's no KSP involved at all here, just plain source files read directly by the
  * task, so the extension can be wired to the task lazily and eagerly at apply() time.

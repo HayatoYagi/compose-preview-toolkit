@@ -157,6 +157,10 @@ plugins {
 }
 ```
 
+Apply this on every module you want included in the graph, not just the aggregator that runs
+`generateDebugNavGraphSite` — applying it unevenly across your Kotlin/Compose modules can make
+Gradle load the Kotlin Gradle plugin via mismatched classloaders.
+
 Edge detection is best-effort and name-based, not type resolution: ambiguous callee names and calls
 beyond the configured depth are dropped with a warning rather than guessed, and there's no
 escape-hatch annotation for gaps — if the scanner misses something real, the scanner should improve
