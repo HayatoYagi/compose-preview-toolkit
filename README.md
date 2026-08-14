@@ -157,12 +157,12 @@ plugins {
 }
 ```
 
-Only needs to be applied where you run `generateDebugNavGraphSite` — a plain module with no Compose
-Kotlin Gradle subplugin of its own (e.g. an `api` module that just declares route types) is
-discovered and scanned via its dependents without applying this plugin there too. One exception: if
-a module *does* apply its own Compose Kotlin Gradle subplugin but not this one, Gradle can end up
-loading the Kotlin Gradle plugin via mismatched classloaders across modules — apply this plugin
-there too if you hit that.
+Only needs to be applied where you run `generateDebugNavGraphSite` — a dependency module with no
+Compose Kotlin Gradle subplugin of its own (e.g. one that just declares route types, with no
+Composable UI) is discovered and scanned via its dependents without applying this plugin there too.
+One exception: if a module *does* apply its own Compose Kotlin Gradle subplugin but not this one,
+Gradle can end up loading the Kotlin Gradle plugin via mismatched classloaders across modules —
+apply this plugin there too if you hit that.
 
 Edge detection is best-effort and name-based, not type resolution: ambiguous callee names and calls
 beyond the configured depth are dropped with a warning rather than guessed, and there's no

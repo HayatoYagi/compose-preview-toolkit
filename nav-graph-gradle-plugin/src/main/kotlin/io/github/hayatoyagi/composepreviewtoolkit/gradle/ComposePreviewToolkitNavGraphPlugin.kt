@@ -19,8 +19,9 @@ import org.gradle.api.artifacts.component.ProjectComponentIdentifier
  *
  * [Project.discoverGraphModules]/[Project.wireGraphModule] read a dependency project's sources
  * directly, so this plugin doesn't need to be applied there for its declarations to be found — a
- * plain module with no Compose Kotlin Gradle subplugin of its own (e.g. an `api` module that just
- * declares route types) is discovered and scanned correctly either way. The one case where this
+ * dependency module with no Compose Kotlin Gradle subplugin of its own (e.g. one that just
+ * declares route types, with no Composable UI) is discovered and scanned correctly either way. The
+ * one case where this
  * plugin *should* also be applied on the dependency project: if that project applies its own
  * Compose Kotlin Gradle subplugin (`org.jetbrains.kotlin.plugin.compose`) but doesn't apply this
  * one, `kotlin-compiler-embeddable` ends up present on only some Compose modules' plugin
