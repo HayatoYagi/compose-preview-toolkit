@@ -8,6 +8,7 @@ import io.github.hayatoyagi.composepreviewtoolkit.navgraph.psi.NAV_EDGE_INDEX_FI
 import io.github.hayatoyagi.composepreviewtoolkit.navgraph.psi.NAV_NODE_INDEX_FILE_NAME
 import org.gradle.api.Plugin
 import org.gradle.api.Project
+import org.gradle.api.artifacts.component.ProjectComponentIdentifier
 
 /**
  * Statically extracts a Compose Navigation3 nav graph from a module's own sources via
@@ -23,12 +24,12 @@ import org.gradle.api.Project
  * gymnastics: there's no KSP involved at all here, just plain source files read directly by the
  * task, so the extension can be wired to the task lazily and eagerly at apply() time.
  *
- * Also registers `generateDebugNavGraphSite`, which aggregates node/edge/screenshot indexes
- * across the modules configured via `composePreviewToolkitNavGraph { graphModules.set(...) }` on
- * the "aggregator" module (typically `app`) and renders a self-contained `index.html` with both a
+ * Also registers `generateDebugNavGraphSite`, which aggregates node/edge/screenshot data across
+ * every project [Project.discoverGraphModules] resolves on the "aggregator" module (typically
+ * `app`, wherever this plugin is applied) and renders a self-contained `index.html` with both a
  * Mermaid.js nav graph diagram and a thumbnail gallery. Cross-project wiring for that task is
- * deferred to [target]'s `afterEvaluate` since `graphModules` is only known once the consumer's
- * own `composePreviewToolkitNavGraph { ... }` block has run.
+ * deferred to [target]'s `afterEvaluate` since [Project.discoverGraphModules] needs AGP to have
+ * already created the debug variant's configurations, which only happens by then.
  */
 class ComposePreviewToolkitNavGraphPlugin : Plugin<Project> {
     override fun apply(target: Project) {
@@ -68,48 +69,88 @@ class ComposePreviewToolkitNavGraphPlugin : Plugin<Project> {
             target.tasks.register("generateDebugNavGraphSite", GenerateDebugNavGraphSite::class.java) { task ->
                 task.routeNameSuffixesToStrip.set(extension.routeNameSuffixesToStrip)
                 // Same convention-backed properties generateDebugNavGraph uses, reused here for
-                // this task's own project-wide edge (re-)scan — see GenerateDebugNavGraphSite's
+                // this task's own project-wide node/edge (re-)scan — see GenerateDebugNavGraphSite's
                 // kdoc for why a project-wide scan is necessary at all.
                 task.entryFunctionNames.set(extension.entryFunctionNames)
                 task.navigateCallNames.set(extension.navigateCallNames)
                 task.callGraphResolutionDepth.set(extension.callGraphResolutionDepth)
+                // Same fallback-only role as GenerateDebugNavGraph's own projectDirectory: only
+                // consulted for a node's filePath when the git repo root can't be determined.
+                task.projectDirectory.set(target.layout.projectDirectory)
                 task.outputDirectory.set(target.layout.buildDirectory.dir("composePreviewToolkit/navGraphSite/debug"))
             }
 
-        // Deferred to afterEvaluate: graphModules is only meaningful once the consumer's own
-        // `composePreviewToolkitNavGraph { graphModules.set(...) }` block (if any) has run, which
-        // happens after this plugin's apply(). Reading it any earlier would silently see an empty
-        // set on every real consumer.
+        // Deferred to afterEvaluate: discoverGraphModules() reads the resolved
+        // "debugCompileClasspath" configuration, which AGP only finishes creating once this
+        // project's own build script (and the plugins it applies) have been evaluated.
         target.afterEvaluate {
-            extension.graphModules.get().forEach { path -> target.wireGraphModule(path, generateDebugNavGraphSite) }
+            target.discoverGraphModules().forEach { path -> target.wireGraphModule(path, generateDebugNavGraphSite) }
         }
     }
 
     /**
-     * Wires one `graphModules` entry into [generateDebugNavGraphSite]: globs its node/edge/
-     * screenshot indexes (mirroring `ComposePreviewToolkitPlugin`'s own `asFileTree.matching { ... }`
-     * glob technique for the KSP output directory, just pointed at [path]'s project instead of the
-     * local one) and adds real Gradle task dependencies on that project's own
-     * `generateDebugNavGraph`/`kspDebugKotlin` so this task never races their outputs. Node and
-     * edge indexes are both written by that same `generateDebugNavGraph` task run (see
-     * `GenerateDebugNavGraph`) into the same output directory, so a single task dependency covers
-     * both globs. Also globs [path]'s raw `.kt` sources into `edgeSourceFiles` — plain source, so
-     * no task dependency needed for that one — since `GenerateDebugNavGraphSite` needs the actual
-     * combined project sources (not just a precomputed per-module edge index) to resolve edges
-     * that cross a `graphModules` boundary; see that task's kdoc for why this turned out to be
-     * necessary.
+     * The full set of Gradle project paths `generateDebugNavGraphSite` aggregates node/edge/
+     * screenshot data across: this project's own path plus every project dependency resolvable
+     * (transitively) from its `debugCompileClasspath` configuration. Not overridable — a route
+     * whose declaration lives outside the scanned set is a hard failure (see
+     * `EntryRegistrations.kt`), so "everything reachable" is the only safe scope.
      *
-     * Cross-project task dependencies use `pluginManager.withPlugin(id) { ... }` rather than
-     * grabbing `tasks.named(...)` unconditionally: `[path]`'s project object always exists once
-     * settings has run, but its build script may not have been evaluated yet at this point in
-     * *this* project's own `afterEvaluate` (project evaluation order across a multi-project build
-     * isn't guaranteed to follow `graphModules`' order, or even this project's own position in
-     * `settings.gradle.kts`). `withPlugin` reacts whenever that project's plugin actually applies
-     * — immediately if it already has, or later during that project's own script evaluation
-     * otherwise — so this works regardless of evaluation order, without forcing eager
-     * cross-project evaluation. This matters concretely for `compose-preview-toolkit-sample`:
-     * `:app` lists `:feature-a`/`:feature-b` in `graphModules`, but those two are declared (and
-     * therefore normally evaluated) *before* `:app` in `sample/settings.gradle.kts`.
+     * Uses `Configuration.incoming.resolutionResult` — Gradle's own dependency resolution engine —
+     * rather than manually walking other projects' `configurations`/`pluginManager`, so this only
+     * ever reads back plain [String] project paths instead of touching those projects' live
+     * build-script objects directly.
+     *
+     * Resolving `debugCompileClasspath` to real dependency projects (not just declared dependency
+     * coordinates, which would stay lazy) forces Gradle to fully evaluate every project it resolves
+     * to. [wireGraphModule] accounts for this: every path returned here is guaranteed to already be
+     * fully evaluated (`Project.getState().getExecuted() == true`) by the time it runs, since
+     * resolving this method's classpath is what forced that evaluation moments earlier in this same
+     * `afterEvaluate` callback.
+     *
+     * `"debugCompileClasspath"` matches this plugin's debug-build-type-only scope elsewhere
+     * (`generateDebugNavGraph`, `generateDebugNavGraphSite`). If it doesn't exist on this project,
+     * this degrades to just this project's own path rather than failing the build.
+     *
+     * Called from inside [target]'s `afterEvaluate`, once AGP has finished creating the debug
+     * variant's configurations.
+     */
+    private fun Project.discoverGraphModules(): Set<String> {
+        val resolvedProjectPaths = configurations.findByName("debugCompileClasspath")
+            ?.let { debugCompileClasspath ->
+                runCatching {
+                    debugCompileClasspath.incoming.resolutionResult.allComponents
+                        .mapNotNull { component -> (component.id as? ProjectComponentIdentifier)?.projectPath }
+                }.getOrElse { failure ->
+                    logger.warn(
+                        "compose-preview-toolkit-navgraph: couldn't resolve 'debugCompileClasspath' to " +
+                            "discover graph modules for $path, falling back to just this project. " +
+                            "Cause: ${failure.message}",
+                    )
+                    emptyList()
+                }
+            }
+            .orEmpty()
+
+        return (resolvedProjectPaths + path).toSet()
+    }
+
+    /**
+     * Wires one [discoverGraphModules] entry into [generateDebugNavGraphSite]: globs its screenshot
+     * indexes (mirroring `ComposePreviewToolkitPlugin`'s own glob technique for the KSP output
+     * directory) and adds a task dependency on that project's own `kspDebugKotlin`. Also globs
+     * [path]'s raw `.kt` sources into `edgeSourceFiles` — see `GenerateDebugNavGraphSite`'s kdoc for
+     * why a combined multi-module scan is needed there. Deliberately no task dependency on [path]'s
+     * own `generateDebugNavGraph`: that task's module-local scan can legitimately hard-fail for
+     * exactly the cross-module shape this task resolves correctly, so `generateDebugNavGraphSite`
+     * must not depend on it succeeding.
+     *
+     * Two Gradle-lifecycle guards below, both stemming from [discoverGraphModules] forcing every
+     * graph module to fully evaluate before this runs:
+     * - `pluginManager.withPlugin(id) { ... }` (not `tasks.named(...)` directly) still works if a
+     *   graph module's plugin somehow isn't applied yet, though in practice it fires synchronously.
+     * - The nested `graphModuleProject.afterEvaluate { ... }` is guarded by
+     *   `graphModuleProject.state.executed`: calling `afterEvaluate` on an already-evaluated project
+     *   throws, so this runs the wiring immediately instead when that's already true.
      */
     private fun Project.wireGraphModule(
         path: String,
@@ -118,28 +159,12 @@ class ComposePreviewToolkitNavGraphPlugin : Plugin<Project> {
         val graphModuleProject = project(path)
 
         generateDebugNavGraphSite.configure { task ->
-            task.nodeIndexFiles.from(
-                graphModuleProject.layout.buildDirectory.dir("generated/composePreviewToolkit/navGraph/debug")
-                    .map { dir ->
-                        dir.asFileTree.matching { filter -> filter.include("$NAV_NODE_INDEX_FILE_NAME.txt") }
-                    },
-            )
-            // Edges are written by the exact same generateDebugNavGraph task run (see
-            // GenerateDebugNavGraph) into the exact same output directory as the node index, so no
-            // separate cross-project task dependency is needed beyond the one already added below
-            // for that task — this glob just points at the second output file it produces.
-            task.edgeIndexFiles.from(
-                graphModuleProject.layout.buildDirectory.dir("generated/composePreviewToolkit/navGraph/debug")
-                    .map { dir ->
-                        dir.asFileTree.matching { filter -> filter.include("$NAV_EDGE_INDEX_FILE_NAME.txt") }
-                    },
-            )
             // Raw source, not a generated artifact — needs no task dependency (mirroring
             // generateDebugNavGraph's own sourceFiles wiring). See GenerateDebugNavGraphSite's
-            // kdoc for why this task needs [path]'s actual sources, not just its precomputed edge
-            // index: a project-wide scan is the only scope that can resolve edges whose
-            // `entry<X> {}` registration and reaching `navigateTo(...)` call site live in
-            // different graphModules projects, which is the common case in practice.
+            // kdoc for why this task needs [path]'s actual sources, not just a precomputed index: a
+            // project-wide scan is the only scope that can resolve edges and node qualifiedNames
+            // whose `entry<X> {}` registration and declaration (or reaching `navigateTo(...)` call
+            // site) live in different graph-module projects, which is the common case in practice.
             task.edgeSourceFiles.from(
                 graphModuleProject.layout.projectDirectory.dir("src/main/kotlin").asFileTree.matching { filter ->
                     filter.include("**/*.kt")
@@ -159,34 +184,29 @@ class ComposePreviewToolkitNavGraphPlugin : Plugin<Project> {
             )
         }
 
-        // Real cross-project task dependency: without this, generateDebugNavGraphSite's globs
-        // above would just race graphModuleProject's own generateDebugNavGraph task (or silently
-        // see nothing, on a clean build where it hasn't run yet) instead of Gradle actually
-        // scheduling and running it first.
-        graphModuleProject.pluginManager.withPlugin(NAV_GRAPH_PLUGIN_ID) {
-            generateDebugNavGraphSite.configure { task ->
-                task.dependsOn(graphModuleProject.tasks.named("generateDebugNavGraph"))
-            }
-        }
-
-        // Same reasoning as ComposePreviewToolkitPlugin's own eager/afterEvaluate split for
-        // kspDebugKotlin: that task doesn't exist until AGP has finished creating the debug
-        // variant's KSP tasks, which (mirroring ComposePreviewToolkitPlugin's own
-        // `target.tasks.findByName("kspDebugKotlin")` call inside *its* afterEvaluate) is only
-        // guaranteed by graphModuleProject's own afterEvaluate — nested here inside withPlugin so
-        // it only runs for graph modules that actually apply the screenshot-testing plugin
-        // (SCREENSHOT_PLUGIN_ID) at all.
+        // kspDebugKotlin doesn't exist until AGP has finished creating the debug variant's KSP
+        // tasks, which is only guaranteed once graphModuleProject's own afterEvaluate listeners
+        // (AGP's own included) have run — nested here inside withPlugin so it only runs for graph
+        // modules that actually apply the screenshot-testing plugin (SCREENSHOT_PLUGIN_ID) at all.
+        // See this method's kdoc for why the state.executed guard below is required here (unlike
+        // ComposePreviewToolkitPlugin's own unconditional-afterEvaluate version of this same
+        // pattern): graphModuleProject has routinely already finished evaluating by this point.
         graphModuleProject.pluginManager.withPlugin(SCREENSHOT_PLUGIN_ID) {
-            graphModuleProject.afterEvaluate {
+            val wireKspDependency = {
                 graphModuleProject.tasks.findByName("kspDebugKotlin")?.let { kspDebugKotlin ->
                     generateDebugNavGraphSite.configure { task -> task.dependsOn(kspDebugKotlin) }
                 }
+                Unit
+            }
+            if (graphModuleProject.state.executed) {
+                wireKspDependency()
+            } else {
+                graphModuleProject.afterEvaluate { wireKspDependency() }
             }
         }
     }
 
     private companion object {
-        const val NAV_GRAPH_PLUGIN_ID = "io.github.hayatoyagi.compose-preview-toolkit.navgraph"
         const val SCREENSHOT_PLUGIN_ID = "io.github.hayatoyagi.compose-preview-toolkit"
     }
 }

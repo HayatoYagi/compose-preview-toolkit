@@ -35,16 +35,6 @@ abstract class ComposePreviewToolkitNavGraphExtension {
     abstract val callGraphResolutionDepth: Property<Int>
 
     /**
-     * Gradle project paths (e.g. `[":feature-a", ":feature-b", ":app"]`) that
-     * `generateDebugNavGraphSite` aggregates node/screenshot indexes across. Only meaningful on
-     * the "aggregator" module (typically the app module) where the site-generation task is
-     * registered; on other modules this property is simply unused. Deliberately has no
-     * convention default: there's no sensible universal default for "which modules make up my
-     * app's graph" — every consumer must set this explicitly.
-     */
-    abstract val graphModules: SetProperty<String>
-
-    /**
      * Suffixes stripped from a route's `simpleName` (case-sensitive, first matching suffix in
      * this set wins) before case-insensitively substring-matching the remainder against a
      * screenshot index entry's wrapper name, to best-effort pair a nav graph node with its

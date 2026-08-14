@@ -1,11 +1,8 @@
 package io.github.hayatoyagi.composepreviewtoolkit.gradle
 
 import io.github.hayatoyagi.composepreviewtoolkit.navgraph.psi.KotlinPsiParser
-import io.github.hayatoyagi.composepreviewtoolkit.navgraph.psi.NavEdge
 import io.github.hayatoyagi.composepreviewtoolkit.navgraph.psi.NavEdgeScanner
-import io.github.hayatoyagi.composepreviewtoolkit.navgraph.psi.NavNode
-import io.github.hayatoyagi.composepreviewtoolkit.navgraph.psi.parseNavEdgeIndex
-import io.github.hayatoyagi.composepreviewtoolkit.navgraph.psi.parseNavNodeIndex
+import io.github.hayatoyagi.composepreviewtoolkit.navgraph.psi.NavNodeScanner
 import org.gradle.api.DefaultTask
 import org.gradle.api.file.ConfigurableFileCollection
 import org.gradle.api.file.DirectoryProperty
@@ -14,6 +11,7 @@ import org.gradle.api.provider.SetProperty
 import org.gradle.api.tasks.CacheableTask
 import org.gradle.api.tasks.Input
 import org.gradle.api.tasks.InputFiles
+import org.gradle.api.tasks.Internal
 import org.gradle.api.tasks.OutputDirectory
 import org.gradle.api.tasks.PathSensitive
 import org.gradle.api.tasks.PathSensitivity
@@ -21,58 +19,63 @@ import org.gradle.api.tasks.TaskAction
 import java.util.Base64
 
 /**
- * Aggregates node indexes ([nodeIndexFiles]) and screenshot indexes/baselines
- * ([screenshotIndexFiles]/[screenshotReferenceImages]) — written by each `graphModules` project's
- * own `generateDebugNavGraph` task / the screenshot-testing plugin's KSP processor — across every
- * project configured via `composePreviewToolkitNavGraph { graphModules.set(...) }`, then renders a
- * single self-contained `index.html`: a Mermaid.js nav graph diagram whose nodes each embed their
- * own representative screenshot thumbnail, clickable to reveal every screenshot matched to that
- * route ([buildGallerySiteHtml]).
+ * Aggregates screenshot indexes/baselines ([screenshotIndexFiles]/[screenshotReferenceImages]) —
+ * written by the screenshot-testing plugin's KSP processor — across every project
+ * `ComposePreviewToolkitNavGraphPlugin.discoverGraphModules` resolves for this aggregator module,
+ * combines that with nodes/edges derived from its own project-wide PSI scan (see below), then
+ * renders a single self-contained `index.html`: a Mermaid.js nav graph diagram whose nodes each
+ * embed their own representative screenshot thumbnail, clickable to reveal every screenshot
+ * matched to that route ([buildGallerySiteHtml]).
  *
- * ## Why edges are (re-)scanned here rather than purely aggregated from [edgeIndexFiles]
+ * ## Why nodes and edges are (re-)scanned here rather than aggregated from each module's own precomputed index
  *
- * [edgeIndexFiles] globs each graph module's own `generateDebugNavGraph`-written edge index — but
- * that task only ever sees *its own* module's sources (see `GenerateDebugNavGraph`'s kdoc), and in
- * practice this makes it blind to almost every real edge: [NavEdgeScanner]'s call-graph
- * reachability search routinely needs to resolve a route's `entry<X> {}` registration (which lives
- * in the module that *owns* that route) together with a `navigateTo(...)` call site that reaches
- * it (which, for both of the sample's real wiring shapes, lives in a *different* module — either
- * the app-level `NavHost` for the callback-threaded pattern, or a sibling feature module for the
- * direct-call pattern). A single-module scan can supply neither side of that unless both happen to
- * live in the same module, which never occurs in `compose-preview-toolkit-sample`. Confirmed
- * empirically while implementing this task: wiring only [edgeIndexFiles] produced zero edges for
- * all three of the sample's real, verified-working edges. Edge detection was always meant to run
- * over the whole project's sources at once, not module-by-module.
+ * `generateDebugNavGraph` (see [GenerateDebugNavGraph]) writes a node/edge index per graph module,
+ * but that task only ever sees *its own* module's sources — which breaks in two related ways for
+ * a multi-module app:
  *
- * So this task additionally re-parses the raw `.kt` sources of every `graphModules` project
- * ([edgeSourceFiles]) and runs one project-wide [NavEdgeScanner.scan] call over all of them
- * together — the same shape [NavEdgeScannerTest]'s own multi-file fixtures already exercise, and
- * the only scan scope that can see both ends of a cross-module edge. [edgeIndexFiles] is still
- * aggregated and unioned in (harmless — a module-local edge is a strict special case of what the
- * project-wide scan already finds, so this never produces duplicates once deduplicated, and keeps
- * per-module edge indexes meaningful in isolation for any future single-module consumer).
+ * - **Edges**: [NavEdgeScanner]'s call-graph reachability search routinely needs to resolve a
+ *   route's `entry<X> {}` registration (which lives in the module that *owns* that route) together
+ *   with a `navigateTo(...)` call site that reaches it (which, for both of the sample's real
+ *   wiring shapes, lives in a *different* module — either the app-level `NavHost` for the
+ *   callback-threaded pattern, or a sibling feature module for the direct-call pattern). A
+ *   single-module scan can supply neither side of that unless both happen to live in the same
+ *   module, which never occurs in `compose-preview-toolkit-sample` — a module-local-only edge scan
+ *   finds zero of its three real edges.
+ * - **Nodes**: a module-local scan resolving a route's `qualifiedName`/`packageName` can only see
+ *   declarations inside its own sources. When an `entry<X> {}` registration's route is actually
+ *   *declared* in a different module (e.g. an `api` module) than the one that *registers* it (e.g.
+ *   a sibling `impl` module) — a routine split in a real multi-module app — that module-local scan
+ *   can't resolve the real declaration at all.
  *
- * All input file collections may legitimately be empty for a given graph module (a module that
- * hasn't applied the navgraph/Phase-1 plugins, or hasn't run its own generation task yet) — that's
- * not an error, it just means that module contributes nothing. `ComposePreviewToolkitNavGraphPlugin`
- * is responsible for making sure this task's real Gradle task dependencies (on each graph module's
- * `generateDebugNavGraph` / `kspDebugKotlin`) are wired so those upstream outputs actually exist by
- * the time this task runs, rather than this task racing them; [edgeSourceFiles] needs no such
- * dependency since it's plain, always-present source, not a generated artifact.
+ * So this task instead re-parses the raw `.kt` sources of every discovered graph module project
+ * ([edgeSourceFiles] — the name undersells it, it's the basis for node detection too now) and runs
+ * one project-wide [NavNodeScanner.scan]/[NavEdgeScanner.scan] pair over all of them together — the
+ * same shape [NavEdgeScannerTest]'s own multi-file fixtures already exercise, and the only scan
+ * scope that can see both a cross-module edge and a cross-module node's real declaration. This
+ * makes each graph module's own precomputed node/edge index (written by its own
+ * `generateDebugNavGraph` run) unnecessary here: this task's own combined scan is a strict superset
+ * of what those precomputed indexes could ever supply, so they're deliberately not read by this
+ * task at all — `generateDebugNavGraph` remains useful as a standalone, module-local sanity check
+ * for a single module, but this task doesn't depend on it having run, or on it having even
+ * succeeded. An unresolvable route declaration is a hard failure (see `EntryRegistrations.kt`'s
+ * `resolveDeclaration`/`toNavNode`): a module-local `generateDebugNavGraph` run can legitimately
+ * hit that failure for the exact cross-module-declaration shape this task exists to resolve
+ * correctly, so this task must not have a hard Gradle task dependency on it succeeding.
+ *
+ * All input file collections may legitimately be empty for a given graph module (e.g. one that
+ * hasn't applied the screenshot-testing plugin, so has no screenshot index or baselines) — that's
+ * not an error, it just means that module contributes nothing on that axis.
+ * `ComposePreviewToolkitNavGraphPlugin` is responsible for making sure this
+ * task's real Gradle task dependency on each graph module's `kspDebugKotlin` (for
+ * [screenshotIndexFiles]) is wired so those upstream outputs actually exist by the time this task
+ * runs; [edgeSourceFiles] needs no such dependency since it's plain, always-present source, not a
+ * generated artifact.
  *
  * Deterministic given its declared inputs, so cacheable like `GenerateDebugNavGraph`/
  * `GenerateScreenshotPreviewTests`.
  */
 @CacheableTask
 abstract class GenerateDebugNavGraphSite : DefaultTask() {
-    @get:InputFiles
-    @get:PathSensitive(PathSensitivity.RELATIVE)
-    abstract val nodeIndexFiles: ConfigurableFileCollection
-
-    @get:InputFiles
-    @get:PathSensitive(PathSensitivity.RELATIVE)
-    abstract val edgeIndexFiles: ConfigurableFileCollection
-
     @get:InputFiles
     @get:PathSensitive(PathSensitivity.RELATIVE)
     abstract val edgeSourceFiles: ConfigurableFileCollection
@@ -85,6 +88,15 @@ abstract class GenerateDebugNavGraphSite : DefaultTask() {
 
     @get:Input
     abstract val callGraphResolutionDepth: Property<Int>
+
+    /**
+     * Fallback base directory for a node's `filePath` when the git repository root can't be
+     * determined — see [GenerateDebugNavGraph.projectDirectory]'s kdoc for the identical reasoning
+     * (also `@Internal`, not `@Input`/`@InputDirectory`, for the same cache-key reason). Normally
+     * the aggregator project's own directory.
+     */
+    @get:Internal
+    abstract val projectDirectory: DirectoryProperty
 
     @get:InputFiles
     @get:PathSensitive(PathSensitivity.RELATIVE)
@@ -102,29 +114,22 @@ abstract class GenerateDebugNavGraphSite : DefaultTask() {
 
     @TaskAction
     fun generate() {
-        val nodes: List<NavNode> =
-            nodeIndexFiles.files
-                .filter { it.isFile }
-                .flatMap { file -> file.reader().use { reader -> parseNavNodeIndex(reader) } }
-
-        val indexedEdges: List<NavEdge> =
-            edgeIndexFiles.files
-                .filter { it.isFile }
-                .flatMap { file -> file.reader().use { reader -> parseNavEdgeIndex(reader) } }
-
-        val scannedEdgeResult = KotlinPsiParser().use { parser ->
+        val (nodes, scannedEdgeResult) = KotlinPsiParser().use { parser ->
             val ktFiles = edgeSourceFiles.files
                 .filter { it.isFile }
                 .map { file -> parser.parse(file) }
-            NavEdgeScanner(
+            val nodes = NavNodeScanner(entryFunctionNames = entryFunctionNames.get())
+                .scan(ktFiles, fallbackBaseDirectory = projectDirectory.get().asFile)
+            val edgeResult = NavEdgeScanner(
                 entryFunctionNames = entryFunctionNames.get(),
                 navigateCallNames = navigateCallNames.get(),
                 callGraphResolutionDepth = callGraphResolutionDepth.get(),
             ).scan(ktFiles)
+            nodes to edgeResult
         }
         scannedEdgeResult.warnings.forEach { warning -> logger.warn("nav-graph edge scan: $warning") }
 
-        val edges = (indexedEdges + scannedEdgeResult.edges).distinct()
+        val edges = scannedEdgeResult.edges.distinct()
 
         val screenshotEntries =
             screenshotIndexFiles.files

@@ -26,7 +26,16 @@ import org.gradle.api.tasks.TaskAction
  * expensive part) and writes the resulting node and edge indexes. This is intentionally
  * module-local: a module only sees `entry<X> {}` registrations and call-graph edges reachable from
  * them written inside its own sources, not those of modules it depends on — combining node/edge
- * indexes across multiple modules into one graph happens in [GenerateDebugNavGraphSite].
+ * data across multiple modules into one graph happens in [GenerateDebugNavGraphSite], which
+ * doesn't read this task's output at all (its own project-wide scan is a strict superset) and
+ * carries no Gradle task dependency on this one for exactly the reason below.
+ *
+ * Because a module-local scan can't see declarations outside its own sources, this can throw when
+ * a registered route is declared in a different module than the one registering it (a routine
+ * `api`/`impl` split in a real multi-module app) — see `EntryRegistrations.kt`'s
+ * `resolveDeclaration`/`toNavNode`. This task is a module-local sanity check, not the source of
+ * truth for a multi-module app's graph — run `generateDebugNavGraphSite` on the aggregator module
+ * for that, whose own project-wide scan resolves exactly this case correctly.
  *
  * [NavEdgeScanner]'s warnings are surfaced via this task's own [org.gradle.api.logging.Logger]
  * rather than failing the build: a nav edge candidate the scanner couldn't resolve is a

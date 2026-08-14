@@ -96,8 +96,9 @@ data class GalleryEntry(
 )
 
 /**
- * Combines [nodes] (aggregated across `graphModules`) with [screenshotEntries]/[referenceImages]
- * (also aggregated) into one flat, deterministically-ordered list of gallery entries — the full
+ * Combines [nodes] (aggregated across every discovered graph module project) with
+ * [screenshotEntries]/[referenceImages] (also aggregated) into one flat, deterministically-ordered
+ * list of gallery entries — the full
  * naming-heuristic pipeline ([matchScreenshotEntry] + [findThumbnailFiles]) minus any file I/O
  * beyond what's already been read into [referenceImages]/[screenshotEntries], so this stays a pure
  * function callable from a unit test without a Gradle project. A node can match multiple
