@@ -17,13 +17,16 @@ import org.gradle.api.artifacts.component.ProjectComponentIdentifier
  * land on the classpath of a consumer who only wants screenshot-test generation. This plugin
  * doesn't require that other plugin to also be applied — a module can use either, both, or neither.
  *
- * Apply this plugin on every module you want included in the graph, even though
  * [Project.discoverGraphModules]/[Project.wireGraphModule] read a dependency project's sources
- * directly and don't themselves require it applied there: `kotlin-compiler-embeddable` needs to be
- * present on every Kotlin/Compose module's plugin classpath *uniformly*, or Gradle ends up
- * resolving the Kotlin Gradle plugin via mismatched classloaders across modules (a real, reproduced
- * failure mode — Gradle logs "The Kotlin Gradle plugin was loaded multiple times in different
- * subprojects, which is not supported and may break the build").
+ * directly, so this plugin doesn't need to be applied there for its declarations to be found — a
+ * plain module with no Compose Kotlin Gradle subplugin of its own (e.g. an `api` module that just
+ * declares route types) is discovered and scanned correctly either way. The one case where this
+ * plugin *should* also be applied on the dependency project: if that project applies its own
+ * Compose Kotlin Gradle subplugin (`org.jetbrains.kotlin.plugin.compose`) but doesn't apply this
+ * one, `kotlin-compiler-embeddable` ends up present on only some Compose modules' plugin
+ * classpaths, and Gradle can resolve the Kotlin Gradle plugin via mismatched classloaders across
+ * modules (a real, reproduced failure mode — Gradle logs "The Kotlin Gradle plugin was loaded
+ * multiple times in different subprojects, which is not supported and may break the build").
  *
  * Unlike `ComposePreviewToolkitPlugin`, this plugin needs no KSP-apply-timing `afterEvaluate`
  * gymnastics: there's no KSP involved at all here, just plain source files read directly by the
