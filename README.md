@@ -186,12 +186,15 @@ plugins {
 Only needs to be applied where you run `generateDebugNavGraphSite` — a dependency module is
 discovered and scanned via its dependents without applying this plugin there too.
 
-Edge detection is best-effort and name-based, not type resolution: ambiguous callee names and calls
-beyond the configured depth are dropped with a warning rather than guessed, and there's no
-escape-hatch annotation for gaps — if the scanner misses something real, the scanner should improve
-rather than asking you to annotate your navigation code. Configure via
-`composePreviewToolkitNavGraph { ... }`'s `entryFunctionNames`, `navigateCallNames`, and
-`callGraphResolutionDepth`.
+Edge detection is best-effort, not type resolution, and recognizes a terminal navigate call two
+independent ways: by callee name (configurable `navigateCallNames`, e.g. `navigateTo(...)`) or by
+declared type — a live callback invoked with a parameter type of `NavKey` (or a known route), as
+written, however it's named (e.g. `onSelectRoute: (NavKey) -> Unit`). A call matching either way is
+an edge; neither requires the other. Ambiguous callee names and calls beyond the configured depth
+are dropped with a warning rather than guessed, and there's no escape-hatch annotation for gaps —
+if the scanner misses something real, the scanner should improve rather than asking you to annotate
+your navigation code. Configure via `composePreviewToolkitNavGraph { ... }`'s `entryFunctionNames`,
+`navigateCallNames`, and `callGraphResolutionDepth`.
 
 ### Gallery site (nodes + edges + screenshots)
 
@@ -271,9 +274,9 @@ generated from this same sample on every push to `main`.
 - Only the `debug` build type is supported currently.
 - AGP's Compose Preview Screenshot Testing is still an alpha feature (`0.0.1-alpha1x` as of this
   writing); breaking changes upstream may require a plugin update.
-- The nav-graph plugin's node/edge analysis is name-based, not type-resolved, throughout, so
-  results are best-effort; node↔screenshot matching is a configurable naming heuristic, not a
-  guaranteed pairing.
+- The nav-graph plugin's node/edge analysis is PSI-only, not type-resolved, throughout (see "Nav
+  Graph" above for its two edge-detection modes), so results are best-effort; node↔screenshot
+  matching is a configurable naming heuristic, not a guaranteed pairing.
 
 ## Contributing
 

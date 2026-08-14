@@ -13,6 +13,8 @@ import org.jetbrains.kotlin.psi.KtNameReferenceExpression
 import org.jetbrains.kotlin.psi.KtNamedFunction
 import org.jetbrains.kotlin.psi.KtNullableType
 import org.jetbrains.kotlin.psi.KtParameter
+import org.jetbrains.kotlin.psi.KtTypeReference
+import org.jetbrains.kotlin.psi.KtUserType
 import org.jetbrains.kotlin.psi.ValueArgument
 
 /**
@@ -46,7 +48,7 @@ data class NavEdgeScanResult(
  *
  * Within a context's subtree, every name reference is classified once, in priority order:
  *
- * 1. **Navigate call**: the reference is a call's callee and its simple name is in
+ * 1. **Navigate call by name**: the reference is a call's callee and its simple name is in
  *    [navigateCallNames] → inspect the call's first argument; if it matches a known route by
  *    simple name (a bare object reference or a constructor call), emit an edge. Terminal — not
  *    traversed further.
@@ -63,6 +65,14 @@ data class NavEdgeScanResult(
  *    this same handling again, costing one further hop each time, which is exactly how this
  *    module resolves `sample/feature-a`'s callback-threaded pattern without any special-casing
  *    (see class kdoc).
+ *
+ *    When such a reference is also itself a call's callee (e.g. `onProceedClick(FeatureBRoute)`),
+ *    it's additionally checked as a **navigate call by declared type**: if the parameter's
+ *    function-type signature, as written (e.g. `(NavKey) -> Unit`), has a parameter type whose
+ *    simple name is `NavKey` or one of the routes found by [NavNodeScanner], this call site is
+ *    treated as a terminal navigate edge exactly like case 1 — same argument resolution, run
+ *    alongside the reachability threading above rather than replacing it. Purely syntactic: a
+ *    parameter with no explicit type annotation is never matched this way.
  * 3. **Known function call**: the reference is a call's callee and its simple name resolves
  *    unambiguously to another parsed [KtNamedFunction] → continue the search from that function's
  *    body at depth + 1, with that function's *own* function-typed parameters as the new live set
@@ -78,7 +88,9 @@ data class NavEdgeScanResult(
  * Callee-name resolution is deliberately simple-name-based with no type resolution (per the design
  * doc's explicit choice): a same-package match is preferred, then an explicit import match: if
  * still ambiguous, the call is dropped with a warning rather than guessed. The same applies to
- * matching a `navigateTo(...)` call's first argument against the route registry.
+ * matching a `navigateTo(...)` call's first argument against the route registry. `NavKey` is the
+ * one type name matched literally throughout — it's `androidx.navigation3.runtime.NavKey`, a fixed
+ * library API, not a project-specific naming convention.
  */
 class NavEdgeScanner(
     private val entryFunctionNames: Set<String> = DEFAULT_ENTRY_FUNCTION_NAMES,
@@ -194,12 +206,24 @@ private fun KtNamedFunction.searchableBody(): KtExpression? = bodyBlockExpressio
 private fun KtNamedFunction.functionTypedParamNames(): Set<String> =
     valueParameters.filter { it.isFunctionTyped() }.mapNotNull { it.name }.toSet()
 
-private fun KtParameter.isFunctionTyped(): Boolean {
+private fun KtParameter.isFunctionTyped(): Boolean = declaredFunctionTypeOrNull() != null
+
+/** [KtParameter.typeReference], as written, unwrapped past `?`, if it's a function type. */
+private fun KtParameter.declaredFunctionTypeOrNull(): KtFunctionType? {
     var typeElement = typeReference?.typeElement
     while (typeElement is KtNullableType) {
         typeElement = typeElement.innerType
     }
-    return typeElement is KtFunctionType
+    return typeElement as? KtFunctionType
+}
+
+/** The simple name of a declared type reference (e.g. `NavKey` from `NavKey` or `NavKey?`), if any. */
+private fun KtTypeReference.declaredSimpleTypeNameOrNull(): String? {
+    var typeElement = this.typeElement
+    while (typeElement is KtNullableType) {
+        typeElement = typeElement.innerType
+    }
+    return (typeElement as? KtUserType)?.referencedName
 }
 
 /** One BFS step: a PSI subtree to scan, at what depth, with which function-typed parameter names are live. */
@@ -252,8 +276,12 @@ private class CallGraphTraversal(
             val isCallee = enclosingCall?.calleeExpression === ref
             when {
                 isCallee && name in navigateCallNames -> handleNavigateCall(enclosingCall, edges)
-                context.owningFunction != null && name in context.liveParams ->
+                context.owningFunction != null && name in context.liveParams -> {
+                    if (isCallee) {
+                        handleTypedParameterInvocation(name, context.owningFunction, enclosingCall, edges)
+                    }
                     expandParameterInvocation(name, context.owningFunction, context.depth, queue)
+                }
                 isCallee -> {
                     val target = resolver.resolveFunction(name, ref.containingKtFile, ref) ?: return@forEach
                     enqueueFunctionBody(target, context.depth, queue)
@@ -334,6 +362,26 @@ private class CallGraphTraversal(
                     "parameter at ${expression.location()}"
             }
         }
+    }
+
+    /**
+     * Checks [call] — an invocation of the live function-typed parameter [paramName] of
+     * [owningFunction] — against its declared type: if that type's parameter list has a type
+     * whose simple name is `NavKey` or a known route, treats [call] as a terminal navigate edge
+     * (same argument resolution as [handleNavigateCall]). A no-op if the parameter has no explicit
+     * function-type annotation, or that type doesn't mention a route-shaped parameter.
+     */
+    private fun handleTypedParameterInvocation(
+        paramName: String,
+        owningFunction: KtNamedFunction,
+        call: KtCallExpression,
+        edges: MutableList<NavEdge>,
+    ) {
+        val parameter = owningFunction.valueParameters.firstOrNull { it.name == paramName } ?: return
+        val functionType = parameter.declaredFunctionTypeOrNull() ?: return
+        val paramTypeNames = functionType.parameters.mapNotNull { it.typeReference?.declaredSimpleTypeNameOrNull() }
+        val isRouteShaped = paramTypeNames.any { it == "NavKey" || it in routesBySimpleName }
+        if (isRouteShaped) handleNavigateCall(call, edges)
     }
 
     private fun handleNavigateCall(
