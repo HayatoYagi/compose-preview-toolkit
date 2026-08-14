@@ -1,6 +1,7 @@
 package io.github.hayatoyagi.composepreviewtoolkit.navgraph.psi
 
 import org.jetbrains.kotlin.psi.KtFile
+import java.io.File
 
 /** Default value for [NavNodeScanner]'s `entryFunctionNames`, matching Nav3's own `entry<T> {}`. */
 val DEFAULT_ENTRY_FUNCTION_NAMES = setOf("entry")
@@ -30,9 +31,19 @@ val DEFAULT_ENTRY_FUNCTION_NAMES = setOf("entry")
 class NavNodeScanner(
     private val entryFunctionNames: Set<String> = DEFAULT_ENTRY_FUNCTION_NAMES,
 ) {
-    fun scan(files: List<KtFile>): List<NavNode> {
+    /**
+     * [fallbackBaseDirectory] is only consulted for [NavNode.filePath] when the git repository
+     * root can't be determined (or a file turns out not to be under it) — see
+     * `EntryRegistrations.kt`'s `locateCallSite`. Typically the owning Gradle module's project
+     * directory; defaults to the JVM process's own working directory, which is a reasonable
+     * fallback base outside of a Gradle-wired caller too (e.g. a plain command-line invocation).
+     */
+    fun scan(
+        files: List<KtFile>,
+        fallbackBaseDirectory: File = File("."),
+    ): List<NavNode> {
         val nodesByQualifiedName = LinkedHashMap<String, NavNode>()
-        findEntryRegistrations(files, entryFunctionNames).forEach { registration ->
+        findEntryRegistrations(files, entryFunctionNames, fallbackBaseDirectory).forEach { registration ->
             nodesByQualifiedName[registration.node.qualifiedName] = registration.node
         }
         return nodesByQualifiedName.values.toList()

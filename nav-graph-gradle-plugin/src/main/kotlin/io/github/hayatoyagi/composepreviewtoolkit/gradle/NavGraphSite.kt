@@ -148,12 +148,45 @@ data class GalleryThumbnail(
  * same "representative" thumbnail — the one embedded directly into this node's own Mermaid graph
  * shape, since only one image can reasonably fit there. All of [thumbnails] are shown when a
  * viewer clicks the node (see [buildGallerySiteHtml]).
+ *
+ * [filePath]/[line] locate this route's `entry<X> { ... }` registration call site (copied from
+ * [io.github.hayatoyagi.composepreviewtoolkit.navgraph.psi.NavNode.filePath]/`.line`), shown as
+ * plain text in the click-to-reveal modal. [sourceUrl], when non-null (built by [buildSourceLink]
+ * — only possible when both `GITHUB_REPOSITORY`/`GITHUB_SHA` are set, i.e. running in GitHub
+ * Actions, and the node's path is git-root-relative), renders that same text as a clickable link
+ * to the exact line on GitHub instead.
  */
 data class GalleryNode(
     val qualifiedName: String,
     val simpleName: String,
     val thumbnails: List<GalleryThumbnail>,
+    val filePath: String = "",
+    val line: Int = 0,
+    val sourceUrl: String? = null,
 )
+
+/**
+ * Builds a GitHub blob URL pointing at [node]'s `entry<X> { ... }` registration call site, or
+ * `null` when a working link can't be built — this is a best-effort, non-essential feature, so it
+ * never guesses:
+ * - [githubRepository]/[githubSha] (meant to be `GITHUB_REPOSITORY`/`GITHUB_SHA`) are both
+ *   auto-populated by GitHub Actions but absent for a local `./gradlew` run — either missing (or
+ *   blank) means no link.
+ * - [node]'s [NavNode.filePathIsRepoRelative] must be `true`: a fallback (non-repo-relative)
+ *   `filePath` would produce a broken or silently wrong link, since `blob/<sha>/<path>` requires a
+ *   path relative to the repository root specifically.
+ *
+ * The `#L<line>` fragment follows GitHub's own single-line-highlight URL convention.
+ */
+fun buildSourceLink(
+    node: NavNode,
+    githubRepository: String?,
+    githubSha: String?,
+): String? {
+    if (githubRepository.isNullOrBlank() || githubSha.isNullOrBlank()) return null
+    if (!node.filePathIsRepoRelative) return null
+    return "https://github.com/$githubRepository/blob/$githubSha/${node.filePath}#L${node.line}"
+}
 
 /**
  * Renders [nodes] + [edges] as a Mermaid.js `graph LR` (left-to-right) flowchart definition (the raw text that
@@ -320,7 +353,10 @@ fun buildGallerySiteHtml(
         .modal { position: relative; background: #fff; border-radius: 12px; padding: 24px; max-width: 900px; width: 100%; max-height: 85vh; overflow-y: auto; box-shadow: 0 8px 30px rgba(0, 0, 0, 0.3); }
         .modal-close { position: absolute; top: 12px; right: 16px; border: none; background: none; font-size: 24px; line-height: 1; cursor: pointer; color: #6e6e73; }
         .modal h2 { margin: 0 0 4px; font-size: 17px; }
-        .modal .qualified-name { font-size: 12px; color: #6e6e73; word-break: break-all; margin-bottom: 16px; }
+        .modal .qualified-name { font-size: 12px; color: #6e6e73; word-break: break-all; margin-bottom: 4px; }
+        .modal .source-location { font-size: 12px; color: #6e6e73; word-break: break-all; margin-bottom: 16px; }
+        .modal .source-location a { color: #06c; text-decoration: none; }
+        .modal .source-location a:hover { text-decoration: underline; }
         .modal-images { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 16px; }
         .modal-images figure { margin: 0; display: flex; flex-direction: column; gap: 6px; }
         .modal-image { width: 100%; border-radius: 8px; display: block; background: #eaeaec; }
@@ -345,6 +381,7 @@ fun buildGallerySiteHtml(
         <button type="button" class="modal-close" aria-label="Close" onclick="cptCloseModal()">&times;</button>
         <h2 id="cpt-modal-title"></h2>
         <div id="cpt-modal-subtitle" class="qualified-name"></div>
+        <div id="cpt-modal-source" class="source-location"></div>
         <div id="cpt-modal-images" class="modal-images"></div>
         </div>
         </div>
@@ -358,6 +395,21 @@ fun buildGallerySiteHtml(
           if (!data) return;
           document.getElementById("cpt-modal-title").textContent = data.simpleName;
           document.getElementById("cpt-modal-subtitle").textContent = data.qualifiedName;
+          const sourceContainer = document.getElementById("cpt-modal-source");
+          sourceContainer.innerHTML = "";
+          if (data.filePath) {
+            const locationText = data.filePath + ":" + data.line;
+            if (data.sourceUrl) {
+              const link = document.createElement("a");
+              link.href = data.sourceUrl;
+              link.target = "_blank";
+              link.rel = "noopener";
+              link.textContent = locationText;
+              sourceContainer.appendChild(link);
+            } else {
+              sourceContainer.textContent = locationText;
+            }
+          }
           const imagesContainer = document.getElementById("cpt-modal-images");
           imagesContainer.innerHTML = "";
           if (data.thumbnails.length === 0) {
@@ -407,7 +459,9 @@ private fun GalleryNode.toJsDataEntry(nodeId: String): String {
     val thumbnailsJson = thumbnails.joinToString(",") { thumbnail ->
         """{"label":"${thumbnail.label.jsStringEscape()}","dataUri":"${thumbnail.dataUri.jsStringEscape()}"}"""
     }
-    return """"$nodeId":{"simpleName":"${simpleName.jsStringEscape()}","qualifiedName":"${qualifiedName.jsStringEscape()}","thumbnails":[$thumbnailsJson]}"""
+    val sourceUrlJson = sourceUrl?.let { "\"${it.jsStringEscape()}\"" } ?: "null"
+    return """"$nodeId":{"simpleName":"${simpleName.jsStringEscape()}","qualifiedName":"${qualifiedName.jsStringEscape()}",""" +
+        """"filePath":"${filePath.jsStringEscape()}","line":$line,"sourceUrl":$sourceUrlJson,"thumbnails":[$thumbnailsJson]}"""
 }
 
 /**
