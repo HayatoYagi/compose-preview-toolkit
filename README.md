@@ -158,11 +158,7 @@ plugins {
 ```
 
 Only needs to be applied where you run `generateDebugNavGraphSite` — a dependency module is
-discovered and scanned via its dependents without applying this plugin there too. If that leads to
-a Gradle warning about "The Kotlin Gradle plugin was loaded multiple times in different
-subprojects", it means some subproject in your build isn't declared the standard way — declare
-every plugin used anywhere in the build once in the root `build.gradle.kts` with `apply false`
-(see `nav-graph-gradle-plugin`'s kdoc for why this fixes it).
+discovered and scanned via its dependents without applying this plugin there too.
 
 Edge detection is best-effort and name-based, not type resolution: ambiguous callee names and calls
 beyond the configured depth are dropped with a warning rather than guessed, and there's no
