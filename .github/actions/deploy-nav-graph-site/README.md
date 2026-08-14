@@ -1,11 +1,7 @@
 # deploy-nav-graph-site
 
 Reusable composite GitHub Action that runs a compose-preview-toolkit nav-graph site generation
-task (`generateDebugNavGraphSite`), and optionally publishes the result via the `mode` input.
-`mode: 'build'` (the default) only runs the Gradle task — no publishing, no Pages permissions
-needed at all, useful for build-only CI dogfooding on every PR. `mode: 'github-pages'` is the full
-managed GitHub-Pages-with-previews experience in one call: it branches internally on the
-triggering event so the caller never has to hand-assemble multiple steps or workflows for it — see
+task (`generateDebugNavGraphSite`) and optionally publishes the result via the `mode` input — see
 "Modes" below.
 
 ## Requirements
@@ -13,16 +9,14 @@ triggering event so the caller never has to hand-assemble multiple steps or work
 - GitHub Actions runner with `bash` and `git` available (for example `ubuntu-latest`)
 - `actions/checkout` executed before this action
 - A Gradle build with `gradlew` in `working-directory`, with `site-task` available in it
-- Repo **Settings → Pages → Source** set to **Deploy from branch**, pointed at `pr-preview-branch`
-  (default `gh-pages`) — only needed if you use `mode: 'github-pages'`; `mode: 'build'` needs no
-  repo Pages configuration at all.
 - Depending on `mode`:
-  - `mode: 'build'` (default): no extra permissions needed.
+  - `mode: 'build'` (default): no extra permissions or repo Pages configuration needed.
   - `mode: 'github-pages'`: the calling job needs `permissions: { contents: write, pull-requests:
-    write }` (or pass a token with equivalent access as `github-token`). The calling workflow must
+    write }` (or pass a token with equivalent access as `github-token`); the calling workflow must
     trigger on both `push` (to publish the persisted main site) and `pull_request` **including
     `closed`** (e.g. `types: [opened, reopened, synchronize, closed]`, to publish/tear down
-    previews) — see "Usage" below for a minimal example covering both.
+    previews — see "Usage" below); and repo **Settings → Pages → Source** must be **Deploy from
+    branch**, pointed at `pr-preview-branch` (default `gh-pages`).
 
 If your project also generates screenshot baselines (e.g. via this repo's own screenshot-testing
 plugin) and you want the gallery thumbnails to reflect the latest ones, run whatever step updates
@@ -85,21 +79,18 @@ it's separate).
     it almost always means the calling workflow's trigger is misconfigured.
 
   Both the main-site and preview deploys are branch-based and share the same `pr-preview-branch`,
-  so there's no repo-wide Pages "Source" setting conflict to worry about (unlike the previous
-  `pages` mode, which used the official Actions Deployments API and required **Source = GitHub
-  Actions** — that mode is gone, and so is the caveat).
+  so only one repo-wide Pages **Source** setting is needed for both.
 
 ## How this repo uses it
 
 This repo dogfoods the full main-site-plus-previews experience for `sample/app`'s generated nav
 graph, positioned in `ci.yml`'s single job right after its screenshot-baseline update step (see
-the note above on why):
+the Requirements note on why):
 
-- `ci.yml` calls this action once with `mode: 'github-pages'` — on `push` to `main` it builds and
-  deploys the persisted main site; on `pull_request` (`ci.yml`'s trigger has no `types:` filter, so
-  only the implicit default `[opened, synchronize, reopened]` reach it) it builds and deploys a
-  live preview. No separate `mode: 'build'` call is needed any more: every path through
-  `mode: 'github-pages'` already builds the site itself before publishing it.
+- `ci.yml` calls this action once with `mode: 'github-pages'`, which builds the site itself before
+  publishing: on `push` to `main` it deploys the persisted main site; on `pull_request` (`ci.yml`'s
+  trigger has no `types:` filter, so only the implicit default `[opened, synchronize, reopened]`
+  reach it) it deploys a live preview.
 - [`nav-graph-pr-preview-teardown.yml`](../../workflows/nav-graph-pr-preview-teardown.yml) calls
   this action with `mode: 'github-pages'` on `pull_request: closed` to tear the preview down —
   kept as its own minimal workflow since teardown needs none of the Gradle/JDK/mavenLocal setup

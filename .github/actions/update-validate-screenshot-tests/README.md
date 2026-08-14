@@ -53,4 +53,3 @@ Common options:
 - `skip-validate`: set to `"true"` to only update baselines
 - `push-ref`: override target branch ref for the auto-commit push
 
-
