@@ -286,7 +286,7 @@ class NavGraphSiteTest {
 
         val graph = buildMermaidGraph(nodes, edges)
 
-        assertTrue(graph.startsWith("graph TD;\n"))
+        assertTrue(graph.startsWith("graph LR;\n"))
         assertTrue(graph.contains("n0[\"HomeRoute\"];"))
         assertTrue(graph.contains("n1[\"FeatureARoute\"];"))
         assertTrue(graph.contains("n0 --> n1;"))

@@ -156,7 +156,7 @@ data class GalleryNode(
 )
 
 /**
- * Renders [nodes] + [edges] as a Mermaid.js `graph TD` flowchart definition (the raw text that
+ * Renders [nodes] + [edges] as a Mermaid.js `graph LR` (left-to-right) flowchart definition (the raw text that
  * goes inside a `<pre class="mermaid">...</pre>` block, without the surrounding HTML), one node
  * declaration line, one click-binding line, followed by one edge line per edge.
  *
@@ -208,7 +208,7 @@ fun buildMermaidGraph(
 ): String {
     val idByQualifiedName = nodes.withIndex().associate { (index, node) -> node.qualifiedName to "n$index" }
     return buildString {
-        append("graph TD;\n")
+        append("graph LR;\n")
         nodes.forEachIndexed { index, node ->
             val nodeId = "n$index"
             val representative = node.thumbnails.firstOrNull()
@@ -236,7 +236,7 @@ fun buildMermaidGraph(
  * aspect ratio — routinely tall/portrait for an Android screen, nothing like square — is preserved
  * instead of being squashed into a fixed box.
  */
-private const val THUMBNAIL_NODE_HEIGHT_PX = 96
+private const val THUMBNAIL_NODE_HEIGHT_PX = 320
 
 /** Name of the global JS function [buildMermaidGraph]'s `click ... call ...()` bindings invoke and [buildGallerySiteHtml] defines. Kept as one constant so the two can never drift apart. */
 private const val NODE_CLICK_CALLBACK = "cptShowScreenshots"
