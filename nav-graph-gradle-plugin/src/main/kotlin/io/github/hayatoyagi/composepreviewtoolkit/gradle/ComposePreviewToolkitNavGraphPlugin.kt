@@ -37,12 +37,7 @@ import java.util.concurrent.Callable
  * across subprojects — present on some, absent on others — can trigger a separate Gradle-core
  * issue: "The Kotlin Gradle plugin was loaded multiple times in different subprojects". This is
  * unrelated to this plugin's own classpath isolation above and isn't fixed by applying this plugin
- * more broadly. Gradle caches plugin classloaders by resolved classpath, not by project, so the
- * fix is to declare every plugin used anywhere in the build once in the root `build.gradle.kts`'s
- * `plugins {}` block with `apply false`: every subproject's own `plugins {}` request for that same
- * id+version then resolves as a no-op contribution to its classpath, keeping every subproject's
- * resolved classpath — and therefore cached ClassLoader — identical. See
- * `HayatoYagi/compose-preview-toolkit#53`.
+ * more broadly — see `HayatoYagi/compose-preview-toolkit#53` for the root cause and fix.
  *
  * Unlike `ComposePreviewToolkitPlugin`, this plugin needs no KSP-apply-timing `afterEvaluate`
  * gymnastics: there's no KSP involved at all here, just plain source files read directly by the
