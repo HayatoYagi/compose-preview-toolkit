@@ -6,7 +6,7 @@ description: >-
   "github-pages" runs the full GitHub-Pages-with-previews experience end to end from this single
   call, branching internally on the triggering event so the caller doesn't have to hand-assemble
   multiple steps or workflows: on `push` it deploys the built site as the persisted main site
-  (branch-based deploy to pr-preview-branch's root); on `pull_request`
+  (branch-based deploy to pages-branch's root); on `pull_request`
   (opened/reopened/synchronize) it deploys a live per-PR preview via rossjrw/pr-preview-action and
   posts a sticky PR comment; on `pull_request: closed` it tears that preview down (skipping its
   own build step, since there's nothing to publish). Any other event type under "github-pages"
@@ -42,13 +42,13 @@ inputs:
       What to do with the built site: "build" (default) only runs the Gradle task — useful for
       dogfooding it on every PR without needing any Pages permissions at all. "github-pages" is
       the full managed experience: on `push` it deploys site-directory as the persisted main site
-      (branch-based deploy to pr-preview-branch's root, excluding pr-preview-umbrella-dir from
+      (branch-based deploy to pages-branch's root, excluding pr-preview-umbrella-dir from
       cleanup so it never wipes live previews); on `pull_request`
       (opened/reopened/synchronize) it deploys a live per-PR preview via rossjrw/pr-preview-action
-      to pr-preview-branch, under pr-preview-umbrella-dir/pr-<number>/, with a sticky PR comment
+      to pages-branch, under pr-preview-umbrella-dir/pr-<number>/, with a sticky PR comment
       linking to it; on `pull_request: closed` it tears that preview down. Both directions use the
       same branch-based mechanism, so the repo's GitHub Pages source setting is just "Deploy from
-      branch" pointed at pr-preview-branch — see README.md's "Nav Graph" section.
+      branch" pointed at pages-branch — see README.md's "Nav Graph" section.
     required: false
     default: 'build'
   github-token:
@@ -59,7 +59,7 @@ inputs:
       contents: write, pull-requests: write }`.
     required: false
     default: ${{ github.token }}
-  pr-preview-branch:
+  pages-branch:
     description: >-
       Branch that mode "github-pages" deploys both the persisted main site and PR previews to.
       Only used when mode is "github-pages". The repo's GitHub Pages source setting must be
@@ -68,7 +68,7 @@ inputs:
     default: 'gh-pages'
   pr-preview-umbrella-dir:
     description: >-
-      Directory on pr-preview-branch containing every PR's preview subdirectory. Only used when
+      Directory on pages-branch containing every PR's preview subdirectory. Only used when
       mode is "github-pages" — also passed as the persisted main-site deploy's clean-exclude
       pattern so that deploy never wipes whatever PR previews are currently live under it.
     required: false
@@ -116,7 +116,7 @@ runs:
       with:
         token: ${{ inputs.github-token }}
         folder: ${{ inputs.site-directory }}
-        branch: ${{ inputs.pr-preview-branch }}
+        branch: ${{ inputs.pages-branch }}
         clean-exclude: ${{ inputs.pr-preview-umbrella-dir }}
         # clean-exclude only protects excluded paths from the clean step's *deletion* pass — it
         # does nothing against force's history-rewriting push, which would still discard whatever
@@ -137,5 +137,5 @@ runs:
       with:
         token: ${{ inputs.github-token }}
         source-dir: ${{ inputs.site-directory }}
-        preview-branch: ${{ inputs.pr-preview-branch }}
+        preview-branch: ${{ inputs.pages-branch }}
         umbrella-dir: ${{ inputs.pr-preview-umbrella-dir }}

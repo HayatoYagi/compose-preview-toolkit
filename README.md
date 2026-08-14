@@ -238,7 +238,7 @@ Two modes, selected by the `mode` input:
   persisted main site; `pull_request` (`opened`/`reopened`/`synchronize`) deploys a live per-PR
   preview with a sticky PR comment; `pull_request: closed` tears that preview down. Both share the
   same branch — requires repo **Settings → Pages → Source** = **Deploy from branch** pointed at
-  `pr-preview-branch`.
+  `pages-branch`.
 
 This repo's own `ci.yml` (plus
 [`nav-graph-pr-preview-teardown.yml`](.github/workflows/nav-graph-pr-preview-teardown.yml)) is a

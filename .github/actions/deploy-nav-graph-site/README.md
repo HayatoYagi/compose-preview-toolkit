@@ -16,7 +16,7 @@ task (`generateDebugNavGraphSite`) and optionally publishes the result via the `
     trigger on both `push` (to publish the persisted main site) and `pull_request` **including
     `closed`** (e.g. `types: [opened, reopened, synchronize, closed]`, to publish/tear down
     previews — see "Usage" below); and repo **Settings → Pages → Source** must be **Deploy from
-    branch**, pointed at `pr-preview-branch` (default `gh-pages`).
+    branch**, pointed at `pages-branch` (default `gh-pages`).
 - **Fresh screenshot baselines before this action runs, in the same job.** Thumbnails paired with
   the nav graph are the actual value of this gallery site — a graph with no thumbnails is the
   unusual case, not the common one — so most consumers pairing this action with a screenshot-testing
@@ -85,11 +85,11 @@ it's separate).
 - **`mode: 'github-pages'`**: publishes the built site, branching on the triggering event:
   - On `push`: deploys `site-directory` as the **persisted main site** — a branch-based deploy
     (via [`JamesIves/github-pages-deploy-action`](https://github.com/JamesIves/github-pages-deploy-action))
-    to `pr-preview-branch`'s root, with `clean-exclude: pr-preview-umbrella-dir` so it never wipes
+    to `pages-branch`'s root, with `clean-exclude: pr-preview-umbrella-dir` so it never wipes
     currently-live PR previews.
   - On `pull_request` (`opened`/`reopened`/`synchronize`): deploys a **live per-PR preview** via
     [`rossjrw/pr-preview-action`](https://github.com/rossjrw/pr-preview-action) to
-    `pr-preview-branch`, under `pr-preview-umbrella-dir/pr-<number>/` (configurable), pushed with
+    `pages-branch`, under `pr-preview-umbrella-dir/pr-<number>/` (configurable), pushed with
     retry-safe git so concurrent PRs' CI runs don't clobber each other's subdirectories, with a
     sticky PR comment linking to it.
   - On `pull_request: closed`: **tears down** that PR's preview — `pr-preview-action` detects the
@@ -98,39 +98,26 @@ it's separate).
   - Any other event type: fails fast with a clear error rather than silently doing nothing, since
     it almost always means the calling workflow's trigger is misconfigured.
 
-  Both the main-site and preview deploys are branch-based and share the same `pr-preview-branch`,
+  Both the main-site and preview deploys are branch-based and share the same `pages-branch`,
   so only one repo-wide Pages **Source** setting is needed for both.
 
 ## How this repo uses it
 
-This repo dogfoods the full main-site-plus-previews experience for `sample/app`'s generated nav
-graph. Unlike the single-job "Usage" example above, `ci.yml` splits this across two jobs, `build`
-then `deploy` (`deploy` has `needs: build`) — but that split is this repo's own overhead, not a
-different recommended pattern: `build` first has to compile this repo's own plugin modules and
-publish them to `mavenLocal` before `sample/` (a separate Gradle build) can even configure, since
-`compose-preview-toolkit` is the plugin's own source repo, dogfooding its own not-yet-published
-code. A real consumer applies a published plugin version and never needs that step, so their
-build+screenshot-update+deploy work fits in one job exactly as shown in "Usage". What *does*
-generalize is the ordering this split preserves: `build` runs the screenshot-baseline update
-(auto-committing any changed baselines) before `deploy` ever checks out, and `deploy` only starts
-once `build` (including its push) has completed — the same "fresh baselines before this action"
-requirement from "Requirements" above, just enforced with `needs:` across jobs instead of step
-order within one job.
+`ci.yml`'s single job follows the same shape as "Usage" above — screenshot-baseline update, then
+this action — with this repo's own extra setup at the front (building its own plugin modules and
+publishing them to `mavenLocal`, since `compose-preview-toolkit` is the plugin's own source repo
+dogfooding its own not-yet-published code; a real consumer applies a published plugin version and
+skips that step entirely):
 
-- `build` builds/tests this repo's plugin modules, publishes them to `mavenLocal`, and runs
-  [`update-validate-screenshot-tests`](../update-validate-screenshot-tests) against `sample/`,
-  which auto-commits any changed baselines back to the branch.
-- `deploy` (`needs: build`) checks out fresh (a separate runner, so nothing from `build` persists),
-  re-publishes the plugin modules to its own `mavenLocal`, then calls this action once with
-  `mode: 'github-pages'`, which builds the site itself before publishing: on `push` to `main` it
-  deploys the persisted main site; on `pull_request` (`ci.yml`'s trigger has no `types:` filter, so
-  only the implicit default `[opened, synchronize, reopened]` reach it) it deploys a live preview —
-  seeing the baselines `build` just committed, since `deploy` only starts after that push lands.
-- [`nav-graph-pr-preview-teardown.yml`](../../workflows/nav-graph-pr-preview-teardown.yml) calls
-  this action with `mode: 'github-pages'` on `pull_request: closed` to tear the preview down —
-  kept as its own minimal workflow since teardown needs none of the Gradle/JDK/mavenLocal setup
-  the build-and-publish steps need, and `ci.yml`'s own `pull_request` trigger never sees `closed`
-  (see the comment at the top of that workflow file).
+- `ci.yml` builds/tests this repo's plugin modules, publishes them to `mavenLocal`, runs
+  [`update-validate-screenshot-tests`](../update-validate-screenshot-tests) against `sample/`
+  (auto-committing any changed baselines), then calls this action with `mode: 'github-pages'`: on
+  `push` to `main` it deploys the persisted main site; on `pull_request` (`ci.yml`'s trigger has no
+  `types:` filter, so only the implicit default `[opened, synchronize, reopened]` reach it) it
+  deploys a live preview.
+- [`nav-graph-pr-preview-teardown.yml`](../../workflows/nav-graph-pr-preview-teardown.yml) — a
+  separate, minimal workflow triggered only on `pull_request: closed` — calls this action with
+  `mode: 'github-pages'` to tear the preview down, skipping all of `ci.yml`'s unrelated setup.
 
 ## Inputs
 
