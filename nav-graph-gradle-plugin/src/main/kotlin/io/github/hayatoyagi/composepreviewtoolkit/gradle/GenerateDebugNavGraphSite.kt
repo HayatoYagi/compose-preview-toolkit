@@ -166,6 +166,7 @@ abstract class GenerateDebugNavGraphSite @Inject constructor(
             GalleryNode(
                 qualifiedName = entry.node.qualifiedName,
                 simpleName = entry.node.simpleName,
+                packageName = entry.node.packageName,
                 thumbnails = entry.thumbnails.map { file ->
                     GalleryThumbnail(
                         label = file.name,
