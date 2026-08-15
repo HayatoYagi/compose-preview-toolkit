@@ -10,19 +10,37 @@ package io.github.hayatoyagi.composepreviewtoolkit.navgraph.psi
 val DEFAULT_ENTRY_FUNCTION_NAMES = setOf("entry")
 
 /**
- * Default bound for `NavEdgeScanner`'s breadth-first call-graph traversal. Chosen empirically:
- * against the real `sample/feature-a`/`sample/feature-b` wiring shape (a callback threaded one
- * level from a feature module's `xNavEntries(...)` up to the app's `NavHost`, a common real-world
- * pattern), the *shortest* discoverable path from an `entry<X> {}` block to its
- * `navigateTo(...)` call resolves at depth 1 in practice — the algorithm here finds a call's
- * argument-as-value-reference (e.g. `Button(onClick = onProceedClick)`) at the same "hop" as the
- * call itself, so a single parameter round-trip (find the wiring function's own call site, look
- * at what was bound there) is usually enough. Deeper chains only occur when the same callback is
- * threaded through *multiple* intermediate composables before finally being invoked (e.g. a
- * screen composable that forwards `onProceedClick` one level further into a child composable
- * before it's finally referenced) — each such pass-through costs exactly one extra hop. 4 leaves
- * headroom for two or three such extra layers without the search needing to be re-tuned per app;
- * unlike an unbounded search, raising this is a per-project-size cost (a wider breadth-first
- * search), not a combinatorial blow-up, since simple-name-keyed lookups keep each hop O(1)-ish.
+ * Default bound for `NavEdgeScanner`'s breadth-first call-graph traversal. Chosen empirically for
+ * `NavEdgeScanner`'s current algorithm: NavBackStack-*mutation* tracking, which anchors on the
+ * real `backStack.add(...)`/`addAll(...)` call and traces every hop needed to reach it — unlike
+ * the retired declared-callback-type detection this replaced, it has no shortcut that lets it stop
+ * early at a call whose own declared parameter type merely *looks* route-shaped (e.g.
+ * `onEntryTap: (DetailRoute) -> Unit`, invoked as `onEntryTap(DetailRoute(id))`); it must keep
+ * tracing through however many further indirection layers separate that call from the real
+ * mutation. This value was previously tuned for the retired algorithm's typical hop count (a
+ * single parameter round-trip was usually enough there); a real production regression - a
+ * previously-found edge going missing after the switch to mutation tracking - showed that hop
+ * count no longer applies, and this was recalibrated the same way the original value was: against
+ * a real-world-shaped case, plus headroom for a couple more layers.
+ *
+ * A callback threaded through a project's UI layer to a concrete route-constructor call costs two
+ * kinds of hop before reaching the mutation: once for each intermediate composable the callback is
+ * threaded through *unchanged* on its way to being invoked (this algorithm has to both discover
+ * where it's finally invoked, and then separately retrace how it was bound at each of those same
+ * layers - two hops per layer, not one, since - unlike the retired algorithm - there is no way to
+ * know in advance that a given parameter pass-through is where the callback will be invoked, only
+ * that it might be), plus a further hop for each distinct closure the callback's real binding
+ * turns out to route through before reaching `backStack.add(...)` (e.g. a UI-level callback bound,
+ * at its wiring site, to a small `{ destination -> navigateTo(destination) }` pass-through, which
+ * itself is a *second* route-carrying closure whose own binding - the app-root `navigateTo` local
+ * val - must also be traced). A case built to mirror this real shape (see
+ * `NavEdgeScannerTest`'s `... needs the recalibrated depth bound - real-world regression repro`
+ * test: a callback threaded through 3 nested UI-component layers, invoked with a concrete route
+ * argument, resolved back through exactly one such chained pass-through closure) needs depth 8 to
+ * resolve at all. 12 leaves headroom for a couple more such UI-component layers (each costing 2,
+ * not 1, hence the larger jump than the original headroom) without the search needing to be
+ * re-tuned per app; unlike an unbounded search, raising this is a per-project-size cost (a wider
+ * breadth-first search), not a combinatorial blow-up, since simple-name-keyed lookups keep each
+ * hop O(1)-ish.
  */
-const val DEFAULT_CALL_GRAPH_RESOLUTION_DEPTH = 4
+const val DEFAULT_CALL_GRAPH_RESOLUTION_DEPTH = 12

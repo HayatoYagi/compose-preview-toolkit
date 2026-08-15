@@ -148,22 +148,31 @@ data class NavEdgeScanResult(
  * `navigateTo`/`goTo` carries the *route itself* as its one parameter — the mutation call inside
  * it (`backStack.add(key)`) refers to that parameter by name, not to a literal route. Resolving
  * that reference requires knowing what a *specific* invocation actually passed. Whenever a
- * live-parameter (case 2) or local-`val` (case 3) reference is itself a call with concrete
- * argument expressions, those expressions are carried alongside the reverse/local resolution
- * (unaffected by how many indirection hops it takes — a plain pass-through never changes what was
- * originally passed) and bound, positionally, to the eventually-resolved
+ * live-parameter (case 2) or local-`val` (case 3) reference is itself a call, its argument
+ * expressions are captured and, before being carried any further, each is resolved one level
+ * through the *current* context's own `substitutions` map (see
+ * [resolvedThroughSubstitutions]) — so an argument that is itself a bare reference to an
+ * *enclosing* route-carrying closure's own parameter is replaced with whatever that closure's
+ * caller actually bound it to, not left as a name with no meaning outside that closure's body. The
+ * (now doubly-resolved-if-needed) expressions are bound, positionally, to the eventually-resolved
  * lambda's/function's own declared parameter list the moment one is found (see
  * [CallGraphTraversal.resolveBoundExpression]'s `KtLambdaExpression`/`KtCallableReferenceExpression`
- * cases) — becoming that one [SearchContext]'s `substitutions` map. A back-stack mutation call's
- * route argument is looked up in this map first (see
- * [CallGraphTraversal.resolveRouteArgumentAndEmitEdge]) before falling back to resolving it as
- * written. This is a purely syntactic, single-hop-of-substitution mechanism — no general
- * expression evaluation — so it resolves the common "closure whose body forwards its own parameter
- * straight into the mutation call" shape (matching `sample/`'s real `navigateTo`) but not, for
- * example, a closure that transforms the value first, or an implicit `it` parameter (which Kotlin
- * doesn't expose as a named [org.jetbrains.kotlin.psi.KtLambdaExpression.valueParameters] entry) —
- * those fall through to the same "give up with a warning" handling as any other unresolvable
- * argument.
+ * cases) — becoming that one [SearchContext]'s own `substitutions` map. A back-stack mutation
+ * call's route argument is looked up in this map first (see
+ * [CallGraphTraversal.resolveRouteArgumentAndEmitEdge], which now shares the same
+ * [resolvedThroughSubstitutions] helper) before falling back to resolving it as written.
+ *
+ * Applying this at every hop — not just once, at the mutation call itself — is what lets *any
+ * number* of nested route-carrying closures resolve correctly (e.g. a closure bound to a UI
+ * component's callback parameter that itself just forwards into a second, app-root-level
+ * `navigateTo`-style closure before that one finally reaches `backStack.add(...)`): each hop only
+ * ever substitutes one level, but composes naturally across hops since every hop's *output*
+ * substitutions map is built from arguments already resolved through *its own input* substitutions
+ * — there is no separate "chain the whole way through" step, and none is needed. Still a purely
+ * syntactic, no-general-expression-evaluation mechanism: a closure that *transforms* the value
+ * before forwarding it (not just renaming it), or an implicit `it` parameter (which Kotlin doesn't
+ * expose as a named [org.jetbrains.kotlin.psi.KtLambdaExpression.valueParameters] entry), still
+ * falls through to the same "give up with a warning" handling as any other unresolvable argument.
  *
  * A context is only ever processed once per entry registration, keyed on *both* its PSI subtree
  * (by referential identity) and its `substitutions` map — which is what guarantees termination in
@@ -477,11 +486,17 @@ private class CallGraphTraversal(
                 isCallee && isBackStackMutationCall(name, enclosingCall) ->
                     handleBackStackMutationCall(enclosingCall, name, context.substitutions, edges)
                 context.owningFunction != null && name in context.liveParams -> {
-                    val callArguments = if (isCallee) enclosingCall.callArgumentExpressions() else null
+                    val callArguments = if (isCallee) {
+                        enclosingCall.callArgumentExpressions()
+                            .map { it.resolvedThroughSubstitutions(context.substitutions) }
+                    } else {
+                        null
+                    }
                     expandParameterInvocation(name, context.owningFunction, context.depth, queue, callArguments)
                 }
                 isCallee -> {
                     val callArguments = enclosingCall.callArgumentExpressions()
+                        .map { it.resolvedThroughSubstitutions(context.substitutions) }
                     val owner = context.owningFunction
                     val resolvedLocally = owner != null &&
                         resolveLocalCallbackReference(name, owner, context.depth, queue, callArguments)
@@ -589,9 +604,7 @@ private class CallGraphTraversal(
         substitutions: Map<String, KtExpression>,
         edges: MutableList<NavEdge>,
     ) {
-        val resolvedExpression = (routeExpression as? KtNameReferenceExpression)
-            ?.let { substitutions[it.getReferencedName()] }
-            ?: routeExpression
+        val resolvedExpression = routeExpression.resolvedThroughSubstitutions(substitutions)
         val chain = resolvedExpression.routeReferenceChainOrNull() ?: return
         val target = resolveQualifiedTarget(chain, resolvedExpression)
         if (target != null) {
@@ -899,6 +912,26 @@ private fun boundArgumentExpression(
 /** [KtCallExpression.getValueArguments]' own argument expressions, in written order. */
 private fun KtCallExpression.callArgumentExpressions(): List<KtExpression> =
     valueArguments.mapNotNull { it.getArgumentExpression() }
+
+/**
+ * [this] resolved one level through [substitutions] (see the class kdoc's "Route-carrying
+ * closures" section): if [this] is itself a bare reference to a name bound in [substitutions] -
+ * i.e. a route-carrying closure's own parameter, referenced by name inside that closure's body -
+ * the expression actually bound to it is returned instead of the parameter-name reference itself
+ * (which could never resolve to a real route on its own). Returns [this] unchanged otherwise (the
+ * common case: a literal expression, or a name that isn't a substituted parameter).
+ *
+ * Called at every point a call's argument expressions are captured for the *next* hop - not just
+ * at the final mutation-call argument - so that a chain of two or more nested route-carrying
+ * closures (e.g. `{ x -> navigateTo(x) }` itself invoked from inside another closure's body)
+ * resolves through each layer in turn rather than only the innermost one: each hop applies its own
+ * *current* substitutions to the arguments it's about to hand off, so by the time a name reaches
+ * the next closure it already denotes whatever was actually, concretely passed further up the
+ * chain - not the immediately-enclosing closure's own parameter name, which is meaningless one
+ * layer removed from it.
+ */
+private fun KtExpression.resolvedThroughSubstitutions(substitutions: Map<String, KtExpression>): KtExpression =
+    (this as? KtNameReferenceExpression)?.let { substitutions[it.getReferencedName()] } ?: this
 
 /** A local property in [owner]'s body named [name] with an initializer, if any. */
 private fun resolveLocalCallbackInitializer(

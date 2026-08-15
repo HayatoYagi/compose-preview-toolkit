@@ -452,6 +452,121 @@ class NavEdgeScannerTest {
     }
 
     @Test
+    fun `a callback threaded through several nested UI-component layers and resolved back through a chained navigate-closure wrapper needs the recalibrated depth bound - real-world regression repro`() {
+        // Reproduces a real regression found via A/B testing this PR's branch against the
+        // pre-PR build on the same production app: one previously-correct edge went missing,
+        // traced (via this scanner's own "beyond depth" warning) to a route-carrying callback
+        // parameter threaded through several nested UI-component layers before finally being
+        // invoked with a concrete route-constructor argument, whose binding itself resolves
+        // through a second, app-root-level pass-through closure before reaching the real
+        // NavBackStack mutation.
+        //
+        // Under the retired declared-callback-type detection, `onEntryTap(DetailRoute(1))`
+        // terminated the search immediately - onEntryTap's own declared type was already
+        // route-shaped, so no further tracing was needed. Under NavBackStack-mutation tracking,
+        // the same call is only the *start* of tracing: the search must walk back up through
+        // every intermediate composable's own pass-through of onEntryTap to find where it was
+        // really bound (AggregatorScreen -> EntryList -> EntryListItem, one hop per layer to
+        // discover the invocation, one more hop each to retrace it), then through the
+        // `{ destination -> navigateTo(destination) }` wrapper into the local `navigateTo`
+        // closure, and finally into `backStack.add(...)`. That's more hops than the old
+        // algorithm ever needed for the equivalent edge, and (at the fixture's 3 UI-component
+        // layers, matching "several" from the real regression) exceeds the pre-fix default of 4.
+        fun aggregatorSource() = """
+            package com.example.regressiondepth.aggregator
+
+            import androidx.navigation3.runtime.EntryProviderScope
+            import androidx.navigation3.runtime.NavKey
+            import androidx.navigation3.runtime.entry
+            import com.example.regressiondepth.detail.DetailRoute
+
+            object AggregatorRoute : NavKey
+
+            fun EntryProviderScope<NavKey>.aggregatorNavEntries(onEntryTap: (DetailRoute) -> Unit) {
+                entry<AggregatorRoute> { AggregatorScreen(onEntryTap = onEntryTap) }
+            }
+
+            fun AggregatorScreen(onEntryTap: (DetailRoute) -> Unit) {
+                EntryList(onEntryTap = onEntryTap)
+            }
+
+            fun EntryList(onEntryTap: (DetailRoute) -> Unit) {
+                EntryListItem(onEntryTap = onEntryTap)
+            }
+
+            fun EntryListItem(onEntryTap: (DetailRoute) -> Unit) {
+                Button(onClick = { onEntryTap(DetailRoute(1)) })
+            }
+
+            fun Button(onClick: () -> Unit) = Unit
+        """.trimIndent()
+
+        fun appRootSource() = """
+            package com.example.regressiondepth.app
+
+            import androidx.navigation3.runtime.NavBackStack
+            import androidx.navigation3.runtime.NavKey
+            import androidx.navigation3.runtime.entryProvider
+            import com.example.regressiondepth.aggregator.aggregatorNavEntries
+
+            fun appRoot() {
+                val backStack = NavBackStack<NavKey>()
+                val navigateTo: (NavKey) -> Unit = { key -> backStack.add(key) }
+                entryProvider<NavKey> {
+                    aggregatorNavEntries(onEntryTap = { destination -> navigateTo(destination) })
+                }
+            }
+        """.trimIndent()
+
+        fun detailSource() = """
+            package com.example.regressiondepth.detail
+
+            import androidx.navigation3.runtime.NavKey
+            import androidx.navigation3.runtime.entry
+
+            data class DetailRoute(val id: Int) : NavKey
+
+            fun registerDetail() {
+                entry<DetailRoute> { DetailScreen() }
+            }
+
+            fun DetailScreen() = Unit
+        """.trimIndent()
+
+        val shallowFiles = listOf(
+            parser.parse("AppRootShallow.kt", appRootSource()),
+            parser.parse("AggregatorShallow.kt", aggregatorSource()),
+            parser.parse("DetailShallow.kt", detailSource()),
+        )
+        // 4 was this project's own pre-fix default - comfortably enough depth for the retired
+        // declared-callback-type algorithm's equivalent hop count, but not for this one.
+        val shallowResult = NavEdgeScanner(callGraphResolutionDepth = 4).scan(shallowFiles)
+        assertTrue(shallowResult.edges.isEmpty(), "expected no edges but found: ${shallowResult.edges}")
+        assertTrue(
+            shallowResult.warnings.any {
+                it.contains("beyond depth", ignoreCase = true) && it.contains("onEntryTap")
+            },
+            "expected a beyond-depth warning resolving \"onEntryTap\" but got: ${shallowResult.warnings}",
+        )
+
+        val deepFiles = listOf(
+            parser.parse("AppRootDeep.kt", appRootSource()),
+            parser.parse("AggregatorDeep.kt", aggregatorSource()),
+            parser.parse("DetailDeep.kt", detailSource()),
+        )
+        val deepResult = NavEdgeScanner().scan(deepFiles)
+        assertEquals(
+            listOf(
+                NavEdge(
+                    "com.example.regressiondepth.aggregator.AggregatorRoute",
+                    "com.example.regressiondepth.detail.DetailRoute",
+                ),
+            ),
+            deepResult.edges,
+        )
+    }
+
+    @Test
     @Timeout(value = 5, unit = TimeUnit.SECONDS)
     fun `a cycle in the call graph terminates without hanging and without finding an edge`() {
         val file = parser.parse(
