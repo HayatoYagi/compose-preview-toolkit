@@ -8,9 +8,13 @@ description: >-
   multiple steps or workflows: on `push` it deploys the built site as the persisted main site
   (branch-based deploy to pages-branch's root); on `pull_request`
   (opened/reopened/synchronize) it deploys a live per-PR preview via rossjrw/pr-preview-action and
-  posts a sticky PR comment; on `pull_request: closed` it tears that preview down (skipping its
-  own build step, since there's nothing to publish). Any other event type under "github-pages"
-  mode fails fast, since it almost always means the calling workflow's trigger is misconfigured.
+  posts/updates a sticky PR comment naming the preview URL and the head commit it was built from
+  (rossjrw/pr-preview-action's own comment has no such customization point, so this action posts
+  its own via peter-evans/find-comment + create-or-update-comment instead); on `pull_request:
+  closed` it tears that preview down (skipping its own build step, since there's nothing to
+  publish) and updates the same sticky comment to say so. Any other event type under
+  "github-pages" mode fails fast, since it almost always means the calling workflow's trigger is
+  misconfigured.
 author: 'HayatoYagi'
 
 inputs:
@@ -139,3 +143,32 @@ runs:
         source-dir: ${{ inputs.site-directory }}
         preview-branch: ${{ inputs.pages-branch }}
         umbrella-dir: ${{ inputs.pr-preview-umbrella-dir }}
+        # The action's own sticky comment has no template/customization input — it's always just
+        # the preview link (plus an optional QR code), with no way to show which commit it was
+        # built from. Disable it and post our own comment below instead.
+        comment: false
+
+    # rossjrw/pr-preview-action's sticky comment can't be customized to show the commit it was
+    # built from, so find-comment + create-or-update-comment (keyed on the marker below) recreates
+    # the same "sticky" behavior — one comment per PR, edited in place — with commit info added.
+    - name: Find existing preview comment
+      if: inputs.mode == 'github-pages' && github.event_name == 'pull_request'
+      id: find-comment
+      uses: peter-evans/find-comment@v3
+      with:
+        token: ${{ inputs.github-token }}
+        issue-number: ${{ github.event.pull_request.number }}
+        comment-author: 'github-actions[bot]'
+        body-includes: '<!-- pr-preview-comment -->'
+
+    - name: Post or update PR preview comment
+      if: inputs.mode == 'github-pages' && github.event_name == 'pull_request'
+      uses: peter-evans/create-or-update-comment@v4
+      with:
+        token: ${{ inputs.github-token }}
+        issue-number: ${{ github.event.pull_request.number }}
+        comment-id: ${{ steps.find-comment.outputs.comment-id }}
+        edit-mode: replace
+        body: |
+          <!-- pr-preview-comment -->
+          ${{ github.event.action != 'closed' && format('🚀 Preview deployed to <{0}> — built from commit `{1}`.', steps.pr-preview.outputs.preview-url, github.event.pull_request.head.sha) || format('🗑️ Preview removed (PR closed at commit `{0}`).', github.event.pull_request.head.sha) }}
