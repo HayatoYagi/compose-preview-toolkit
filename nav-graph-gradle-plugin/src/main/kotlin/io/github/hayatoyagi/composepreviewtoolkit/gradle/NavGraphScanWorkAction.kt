@@ -15,7 +15,6 @@ import org.gradle.workers.WorkParameters
 internal interface NavGraphScanParameters : WorkParameters {
     val sourceFiles: ConfigurableFileCollection
     val entryFunctionNames: SetProperty<String>
-    val navigateCallNames: SetProperty<String>
     val callGraphResolutionDepth: Property<Int>
     val fallbackBaseDirectory: DirectoryProperty
     val outputFile: RegularFileProperty
@@ -37,7 +36,6 @@ internal abstract class NavGraphScanWorkAction : WorkAction<NavGraphScanParamete
                 .scan(ktFiles, fallbackBaseDirectory = parameters.fallbackBaseDirectory.get().asFile)
             val edgeResult = NavEdgeScanner(
                 entryFunctionNames = parameters.entryFunctionNames.get(),
-                navigateCallNames = parameters.navigateCallNames.get(),
                 callGraphResolutionDepth = parameters.callGraphResolutionDepth.get(),
             ).scan(ktFiles)
             nodes to edgeResult
