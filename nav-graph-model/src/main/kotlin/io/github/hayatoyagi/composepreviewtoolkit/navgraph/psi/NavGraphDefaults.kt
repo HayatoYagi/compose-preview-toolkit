@@ -12,8 +12,8 @@ val DEFAULT_ENTRY_FUNCTION_NAMES = setOf("entry")
 /**
  * Default bound for `NavEdgeScanner`'s breadth-first call-graph traversal. Chosen empirically:
  * against the real `sample/feature-a`/`sample/feature-b` wiring shape (a callback threaded one
- * level from a feature module's `xNavEntries(...)` up to the app's `NavHost`, matching real
- * medimo-android code), the *shortest* discoverable path from an `entry<X> {}` block to its
+ * level from a feature module's `xNavEntries(...)` up to the app's `NavHost`, a common real-world
+ * pattern), the *shortest* discoverable path from an `entry<X> {}` block to its
  * `navigateTo(...)` call resolves at depth 1 in practice — the algorithm here finds a call's
  * argument-as-value-reference (e.g. `Button(onClick = onProceedClick)`) at the same "hop" as the
  * call itself, so a single parameter round-trip (find the wiring function's own call site, look
