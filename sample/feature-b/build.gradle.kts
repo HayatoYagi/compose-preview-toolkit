@@ -31,9 +31,10 @@ android {
 
 dependencies {
     // Needed for the "restart" affordance in FeatureBNavEntries.kt: feature-b calls
-    // navigateTo(FeatureARoute) directly (pattern (ii) — no callback threaded up to app level for
-    // this particular edge, unlike featureANavEntries's onProceedClick), which requires FeatureARoute
-    // itself on the compile classpath.
+    // navigateTo(FeatureARoute) directly (the app's navigateTo closure is threaded in as a
+    // parameter and invoked right here, unlike featureANavEntries's zero-arg onProceedClick,
+    // which is only actually invoked back at app level), which requires FeatureARoute itself
+    // on the compile classpath.
     implementation(project(":feature-a"))
 
     implementation(libs.compose.runtime)

@@ -172,9 +172,8 @@ for every input.
 A **separate** plugin id, `io.github.hayatoyagi.compose-preview-toolkit.navgraph`, with the same
 [Gradle/Kotlin requirements](#requirements) as Screenshot Testing above but neither AGP's
 screenshot-testing alpha feature nor KSP. It statically scans every discovered module's
-`src/main/kotlin` for Navigation3 `entry<Route> { ... }` registrations (nodes) and
-`navigateTo`/`navigate`-shaped calls reachable from each one via a bounded-depth call-graph search
-(edges):
+`src/main/kotlin` for Navigation3 `entry<Route> { ... }` registrations (nodes) and navigation edges
+reachable from each one via a bounded-depth call-graph search:
 
 ```kotlin
 // feature module's build.gradle.kts
@@ -186,15 +185,20 @@ plugins {
 Only needs to be applied where you run `generateDebugNavGraphSite` — a dependency module is
 discovered and scanned via its dependents without applying this plugin there too.
 
-Edge detection is best-effort, not type resolution, and recognizes a terminal navigate call two
-independent ways: by callee name (configurable `navigateCallNames`, e.g. `navigateTo(...)`) or by
-declared type — a live callback invoked with a parameter type of `NavKey` (or a known route), as
-written, however it's named (e.g. `onSelectRoute: (NavKey) -> Unit`). A call matching either way is
-an edge; neither requires the other. Ambiguous callee names and calls beyond the configured depth
-are dropped with a warning rather than guessed, and there's no escape-hatch annotation for gaps —
-if the scanner misses something real, the scanner should improve rather than asking you to annotate
-your navigation code. Configure via `composePreviewToolkitNavGraph { ... }`'s `entryFunctionNames`,
-`navigateCallNames`, and `callGraphResolutionDepth`.
+Edge detection is best-effort, not type resolution. Navigation3 has no prescribed "navigate"
+function — an app's `NavBackStack<NavKey>` is just a mutable list, and every project writes its own
+wrapper(s) around mutating it, under whatever name and however many layers of indirection it likes.
+Rather than matching a wrapper's name or declared shape, the scanner anchors on the one thing that
+*is* real Nav3 API: it finds the app's `NavBackStack<NavKey>()` construction site (and any
+`NavBackStack`-typed parameter, treated as another name for that same instance), then treats a call
+that mutates it — `add`/`addAll`, reached via the same bounded-depth call-graph search used for
+threaded callbacks — as the edge. Only a single, app-wide shared `NavBackStack` instance is
+supported: if more than one construction site is found, all `NavBackStack`-mutation-based edges are
+dropped with a warning rather than guessed. Ambiguous callee names, ambiguous route arguments, and
+calls beyond the configured depth are also dropped with a warning rather than guessed, and there's
+no escape-hatch annotation for gaps — if the scanner misses something real, the scanner should
+improve rather than asking you to annotate your navigation code. Configure via
+`composePreviewToolkitNavGraph { ... }`'s `entryFunctionNames` and `callGraphResolutionDepth`.
 
 ### Gallery site (nodes + edges + screenshots)
 
@@ -259,10 +263,13 @@ above) alongside the screenshot-test plugin. All three modules apply the screens
 every route gets a real thumbnail in the generated gallery; only `sample/app` applies the nav-graph
 plugin, demonstrating "apply once, on the aggregator only" (see "Nav Graph" above).
 
-The sample also demonstrates both edge-detection shapes: `feature-a`'s `onProceedClick`, written at
-the app level and passed in as a callback (`AppNavHost.kt`/`FeatureANavEntries.kt`), and
-`feature-b`'s "Restart from Feature A" button, which calls `navigateTo(FeatureARoute)` directly
-with no callback indirection (`FeatureBNavEntries.kt`). Both are found by the same call-graph
+`AppNavHost.kt` constructs the app's one real `NavBackStack<NavKey>` and wraps it in a local
+`navigateTo` closure, demonstrating every shape the edge detector supports: `navigateTo` is called
+inline right where it's declared (`HomeRoute`'s "Go to Feature A" button), threaded as a zero-arg
+callback into `feature-a`'s `onProceedClick` and only actually called back in `AppNavHost.kt`
+(`FeatureANavEntries.kt`), and handed to `feature-b` as the closure itself, which calls it directly
+in its own `entry<FeatureBRoute> { ... }` block for the "Restart from Feature A" button
+(`FeatureBNavEntries.kt`). All three are found by the same `NavBackStack`-mutation-tracking
 algorithm — see `nav-graph-psi-analyzer`'s `NavEdgeScanner` kdoc for how.
 
 See it live at
@@ -275,8 +282,12 @@ generated from this same sample on every push to `main`.
 - AGP's Compose Preview Screenshot Testing is still an alpha feature (`0.0.1-alpha1x` as of this
   writing); breaking changes upstream may require a plugin update.
 - The nav-graph plugin's node/edge analysis is syntactic, not type-resolved, throughout (see "Nav
-  Graph" above for its two edge-detection modes), so results are best-effort; node↔screenshot
-  matching is a configurable naming heuristic, not a guaranteed pairing.
+  Graph" above for how edge detection anchors on the tracked `NavBackStack` instance), so results
+  are best-effort; node↔screenshot matching is a configurable naming heuristic, not a guaranteed
+  pairing.
+- Only a single, app-wide shared `NavBackStack` instance is supported for edge detection. An app
+  with multiple independent `NavBackStack`s (e.g. one per pane in a multi-pane layout) is detected
+  and all `NavBackStack`-mutation-based edges are dropped with a warning, rather than guessed.
 
 ## Contributing
 
