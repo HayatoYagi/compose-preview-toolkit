@@ -441,6 +441,207 @@ class NavEdgeScannerTest {
     }
 
     @Test
+    fun `a navigate call qualified with its parent route disambiguates between sealed-hierarchy siblings sharing a leaf name`() {
+        // TodoRoute.Detail and NoteRoute.Detail are two different sealed-hierarchy siblings that
+        // happen to share the leaf simple name "Detail" (see NavNode's own kdoc for this exact
+        // shape). navigateTo(TodoRoute.Detail) carries enough information in its own qualifier to
+        // pick the right one without guessing.
+        val file = parser.parse(
+            "SiblingRoutes.kt",
+            """
+            package com.example.siblings
+
+            import androidx.navigation3.runtime.NavKey
+            import androidx.navigation3.runtime.entry
+
+            sealed interface TodoRoute : NavKey {
+                object Detail : TodoRoute
+            }
+
+            sealed interface NoteRoute : NavKey {
+                object Detail : NoteRoute
+            }
+
+            object ListRoute : NavKey
+
+            fun registerSiblings() {
+                entry<ListRoute> { navigateTo(TodoRoute.Detail) }
+                entry<TodoRoute.Detail> { TodoDetailScreen() }
+                entry<NoteRoute.Detail> { NoteDetailScreen() }
+            }
+
+            fun TodoDetailScreen() = Unit
+            fun NoteDetailScreen() = Unit
+            fun navigateTo(route: NavKey) = Unit
+            """.trimIndent(),
+        )
+
+        val result = NavEdgeScanner().scan(listOf(file))
+
+        assertEquals(
+            listOf(NavEdge("com.example.siblings.ListRoute", "com.example.siblings.TodoRoute.Detail")),
+            result.edges,
+        )
+        assertTrue(
+            result.warnings.none { it.contains("ambiguous", ignoreCase = true) },
+            "expected no ambiguity warning but got: ${result.warnings}",
+        )
+    }
+
+    @Test
+    fun `a bare unqualified reference matching multiple sibling leaf names is still dropped with a warning`() {
+        // Same sibling shape as above, but the navigate call omits the qualifier entirely, so
+        // there's genuinely nothing in the source to disambiguate with - this must still warn
+        // rather than guess.
+        val file = parser.parse(
+            "BareSiblingRoutes.kt",
+            """
+            package com.example.baresiblings
+
+            import androidx.navigation3.runtime.NavKey
+            import androidx.navigation3.runtime.entry
+
+            sealed interface TodoRoute : NavKey {
+                object Detail : TodoRoute
+            }
+
+            sealed interface NoteRoute : NavKey {
+                object Detail : NoteRoute
+            }
+
+            object ListRoute : NavKey
+
+            fun registerBareSiblings() {
+                entry<ListRoute> { navigateTo(Detail) }
+                entry<TodoRoute.Detail> { TodoDetailScreen() }
+                entry<NoteRoute.Detail> { NoteDetailScreen() }
+            }
+
+            fun TodoDetailScreen() = Unit
+            fun NoteDetailScreen() = Unit
+            fun navigateTo(route: NavKey) = Unit
+            """.trimIndent(),
+        )
+
+        val result = NavEdgeScanner().scan(listOf(file))
+
+        assertTrue(result.edges.isEmpty(), "expected no edges but found: ${result.edges}")
+        assertTrue(
+            result.warnings.any { it.contains("ambiguous", ignoreCase = true) && it.contains("Detail") },
+            "expected an ambiguous-target warning but got: ${result.warnings}",
+        )
+    }
+
+    @Test
+    fun `a bare reference disambiguated via the call site's own import, idiomatic Kotlin's avoid-repeating-the-qualifier pattern`() {
+        // Same sibling shape as the two tests above, but this time the routes are declared in one
+        // file and the navigate call lives in a *different* file that writes
+        // `import com.example.siblingsimport.TodoRoute.Detail` and then calls `navigateTo(Detail)`
+        // bare - the idiomatic-Kotlin way to avoid repeating the qualifier at every call site.
+        // There's no written qualifier at the call site to narrow with (same as the bare-reference
+        // test above), but the import alone is enough to pick TodoRoute.Detail over NoteRoute.Detail
+        // without needing type resolution.
+        val routes = parser.parse(
+            "SiblingRoutesForImport.kt",
+            """
+            package com.example.siblingsimport
+
+            import androidx.navigation3.runtime.NavKey
+            import androidx.navigation3.runtime.entry
+
+            sealed interface TodoRoute : NavKey {
+                object Detail : TodoRoute
+            }
+
+            sealed interface NoteRoute : NavKey {
+                object Detail : NoteRoute
+            }
+
+            fun registerSiblingDetails() {
+                entry<TodoRoute.Detail> { TodoDetailScreen() }
+                entry<NoteRoute.Detail> { NoteDetailScreen() }
+            }
+
+            fun TodoDetailScreen() = Unit
+            fun NoteDetailScreen() = Unit
+            """.trimIndent(),
+        )
+        val appNavHost = parser.parse(
+            "AppNavHostForImport.kt",
+            """
+            package com.example.appimport
+
+            import androidx.navigation3.runtime.NavKey
+            import androidx.navigation3.runtime.entry
+            import com.example.siblingsimport.TodoRoute.Detail
+
+            object ListRoute : NavKey
+
+            fun registerAppImport() {
+                entry<ListRoute> { navigateTo(Detail) }
+            }
+
+            fun navigateTo(route: NavKey) = Unit
+            """.trimIndent(),
+        )
+
+        val result = NavEdgeScanner().scan(listOf(routes, appNavHost))
+
+        assertEquals(
+            listOf(NavEdge("com.example.appimport.ListRoute", "com.example.siblingsimport.TodoRoute.Detail")),
+            result.edges,
+        )
+        assertTrue(
+            result.warnings.none { it.contains("ambiguous", ignoreCase = true) },
+            "expected no ambiguity warning but got: ${result.warnings}",
+        )
+    }
+
+    @Test
+    fun `a written qualifier's coincidental tail match with an unrelated deeper-nested route is not guessed`() {
+        // Foo.TodoRoute.Detail is an unrelated, differently-nested route that happens to share its
+        // last two segments with the call site's own written qualifier TodoRoute.Detail. A
+        // suffix-based tail match would incorrectly treat this as the (uniquely matching) target;
+        // the qualifier must instead resolve to a real canonical fully-qualified name (via import
+        // or same-package assumption) before any lookup happens, and neither applies here (there is
+        // no top-level TodoRoute in this package, nor any import for one), so this must be dropped
+        // with a warning rather than guessed.
+        val file = parser.parse(
+            "QualifierFalsePositive.kt",
+            """
+            package com.example.qualifierfalsepositive
+
+            import androidx.navigation3.runtime.NavKey
+            import androidx.navigation3.runtime.entry
+
+            object ListRoute : NavKey
+
+            sealed interface Foo : NavKey {
+                sealed interface TodoRoute : NavKey {
+                    object Detail : TodoRoute
+                }
+            }
+
+            fun register() {
+                entry<ListRoute> { navigateTo(TodoRoute.Detail) }
+                entry<Foo.TodoRoute.Detail> { NestedDetailScreen() }
+            }
+
+            fun NestedDetailScreen() = Unit
+            fun navigateTo(route: NavKey) = Unit
+            """.trimIndent(),
+        )
+
+        val result = NavEdgeScanner().scan(listOf(file))
+
+        assertTrue(result.edges.isEmpty(), "expected no edges but found: ${result.edges}")
+        assertTrue(
+            result.warnings.any { it.contains("ambiguous", ignoreCase = true) && it.contains("TodoRoute.Detail") },
+            "expected a give-up warning but got: ${result.warnings}",
+        )
+    }
+
+    @Test
     fun `a callback relying purely on type inference, with no explicit annotation, is not found - known limitation`() {
         // Matches the documented gap: a local val lambda with an untyped parameter is invisible to
         // this purely-syntactic scanner regardless of naming, since it isn't even tracked as a live
