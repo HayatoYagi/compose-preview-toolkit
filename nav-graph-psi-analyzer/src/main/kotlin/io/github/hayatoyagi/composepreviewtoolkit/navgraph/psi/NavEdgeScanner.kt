@@ -80,6 +80,18 @@ data class NavEdgeScanResult(
  *    treated as a terminal navigate edge exactly like case 1 — same argument resolution, run
  *    alongside the reachability threading above rather than replacing it. Purely syntactic: a
  *    parameter with no explicit type annotation is never matched this way.
+ *
+ *    The reverse edge's project-wide "every call site" search is unaware of *which* call site
+ *    the current route's search actually descended from — by design, since the whole point is
+ *    following reachability to wherever the parameter is really bound. This is safe as long as
+ *    every one of those call sites' bound expressions belongs to that route's own logic. It stops
+ *    being safe when the function being unwound is a shared, general-purpose composable that takes
+ *    *more than one* function-typed parameter (e.g. a Scaffold-style wrapper with both `onBack` and
+ *    a `content` slot): invoking that wrapper's `content` parameter in its own body triggers this
+ *    same reverse search on `content`, which finds every route that happens to use the same
+ *    wrapper — including one whose `content` argument is a lambda holding an unrelated aggregator
+ *    route's own real `navigateTo(...)` calls. [CallGraphTraversal] must never resolve into such a
+ *    lambda: see [CallGraphTraversal.blockedAsAnotherRoutesEntryRegistration]'s kdoc.
  * 3. **Known function call**: the reference is a call's callee and its simple name resolves
  *    unambiguously to another parsed [KtNamedFunction] → continue the search from that function's
  *    body at depth + 1, with that function's *own* function-typed parameters as the new live set
@@ -142,10 +154,13 @@ class NavEdgeScanner(
 
         val resolver = CalleeResolver(functionsBySimpleName, callsBySimpleName, warnings)
         val entryHostingFunctions = findEntryHostingFunctions(entryRegistrations, resolver)
+        val entryRegistrationLambdas: Set<KtLambdaExpression> =
+            entryRegistrations.mapNotNullTo(mutableSetOf()) { it.call.entryRegistrationLambda() }
 
         val edges = LinkedHashSet<NavEdge>()
         entryRegistrations.forEach { registration ->
-            val lambdaBody = registration.call.entryLambdaBody() ?: return@forEach
+            val ownLambda = registration.call.entryRegistrationLambda() ?: return@forEach
+            val lambdaBody = ownLambda.bodyExpression ?: return@forEach
             val owningFunction = PsiTreeUtil.getParentOfType(registration.call, KtNamedFunction::class.java)
             val traversal = CallGraphTraversal(
                 sourceRoute = registration.node.qualifiedName,
@@ -155,6 +170,8 @@ class NavEdgeScanner(
                 resolver = resolver,
                 maxDepth = callGraphResolutionDepth,
                 entryHostingFunctions = entryHostingFunctions,
+                entryRegistrationLambdas = entryRegistrationLambdas,
+                ownEntryRegistrationLambda = ownLambda,
                 warnings = warnings,
             )
             edges += traversal.run(lambdaBody, owningFunction)
@@ -199,8 +216,8 @@ class NavEdgeScanner(
         return hosts
     }
 
-    private fun KtCallExpression.entryLambdaBody(): KtExpression? =
-        lambdaArguments.firstOrNull()?.getLambdaExpression()?.bodyExpression
+    private fun KtCallExpression.entryRegistrationLambda(): KtLambdaExpression? =
+        lambdaArguments.firstOrNull()?.getLambdaExpression()
 
     private fun KtCallExpression.calleeSimpleNameOrNull(): String? =
         (calleeExpression as? KtNameReferenceExpression)?.getReferencedName()
@@ -307,6 +324,8 @@ private class CallGraphTraversal(
     private val resolver: CalleeResolver,
     private val maxDepth: Int,
     private val entryHostingFunctions: Set<KtNamedFunction>,
+    private val entryRegistrationLambdas: Set<KtLambdaExpression>,
+    private val ownEntryRegistrationLambda: KtLambdaExpression?,
     private val warnings: MutableList<String>,
 ) {
     private val visited = HashSet<KtExpression>()
@@ -384,6 +403,41 @@ private class CallGraphTraversal(
         return true
     }
 
+    /**
+     * True (after recording a warning) if [expression] is lexically nested inside — or is itself —
+     * some *other* route's own `entry<X> {}` trailing lambda (any member of
+     * [entryRegistrationLambdas] besides [ownEntryRegistrationLambda]). This is the same scope-leak
+     * category [blockedAsEntryHostingFunction] guards against, but reached through a different code
+     * path: a shared, general-purpose composable that takes more than one function-typed parameter
+     * (e.g. a Scaffold-style wrapper with both `onBack` and a `content` slot) is not itself an
+     * "entry-hosting function" — nothing about it calls `entry<...> {}` — so
+     * [blockedAsEntryHostingFunction] has nothing to refuse. But when *that* wrapper's `content`
+     * parameter is itself invoked in its body, [expandParameterInvocation] finds every call site of
+     * the wrapper project-wide and, for each one, threads through here — including a call site that
+     * lives inside some unrelated aggregator route's own registration, whose `content` argument is a
+     * lambda holding that aggregator's own, entirely real `navigateTo(...)` calls. Scanning that
+     * lambda here would misattribute the aggregator's own edges to whatever route's search happened
+     * to reach the shared wrapper - checked by walking up [expression]'s PSI ancestors rather than
+     * requiring exact identity, since the leaking lambda is typically nested several calls deep
+     * inside the other registration's trailing lambda (as in the Scaffold example above), not
+     * necessarily written as its immediate body.
+     */
+    private fun blockedAsAnotherRoutesEntryRegistration(expression: KtExpression): Boolean {
+        var current: PsiElement? = expression
+        while (current != null) {
+            if (current is KtLambdaExpression && current in entryRegistrationLambdas) {
+                if (current == ownEntryRegistrationLambda) return false
+                warnings += "nav edge candidate unresolved from route \"$sourceRoute\": the bound callback " +
+                    "is itself part of another route's own entry<...> registration, and is only ever " +
+                    "scanned as that registration's own search root, never re-entered from another route's " +
+                    "search, at ${expression.location()}"
+                return true
+            }
+            current = current.parent
+        }
+        return false
+    }
+
     private fun expandParameterInvocation(
         paramName: String,
         owningFunction: KtNamedFunction,
@@ -410,6 +464,7 @@ private class CallGraphTraversal(
     ) {
         when (expression) {
             is KtLambdaExpression -> {
+                if (blockedAsAnotherRoutesEntryRegistration(expression)) return
                 val body = expression.bodyExpression ?: return
                 val closureOwner = PsiTreeUtil.getParentOfType(expression, KtNamedFunction::class.java)
                 queue.add(SearchContext(body, depth, closureOwner?.functionTypedParamNames().orEmpty(), closureOwner))

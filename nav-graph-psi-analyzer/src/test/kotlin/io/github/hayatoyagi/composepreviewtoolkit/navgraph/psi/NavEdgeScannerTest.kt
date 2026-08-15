@@ -882,4 +882,171 @@ class NavEdgeScannerTest {
 
         assertTrue(result.edges.isEmpty(), "expected no edges but found: ${result.edges}")
     }
+
+    @Test
+    fun `a route reached only via a shared wrapper's content slot must not inherit an unrelated aggregator's own navigateTo calls`() {
+        // Regression test for a second, distinct real false-positive bug (different mechanism than
+        // the entry-hosting-function-reentry bug above, and NOT fixed by that guard). FeatureScaffold
+        // is a shared, general-purpose wrapper used by multiple unrelated routes and takes two
+        // function-typed parameters: onBack (a real navigation callback) and content (a plain UI
+        // composition slot invoked once, inline, in the wrapper's own body).
+        //
+        // RouteB.Top is the real navigation aggregator: its own entry<RouteB.Top> registration wires
+        // 4 real, legitimate navigateTo calls (to RouteB.Edit, RouteC, RouteA, RouteD), reached
+        // through FeatureScaffold's content slot.
+        //
+        // RouteC has no navigateTo call anywhere in its own reachable code - its only callback is a
+        // plain onBack threaded through FeatureScaffold, same as RouteB.Top's onBack. Because
+        // FeatureScaffold's body invokes content() (case 2's "parameter reference" reverse-edge
+        // machinery treats this exactly like invoking onBack), RouteC's search - while resolving its
+        // own onBack through FeatureScaffold - also stumbles onto FeatureScaffold's "content"
+        // parameter being live, and reverse-searches every project-wide call site of FeatureScaffold,
+        // including RouteB.Top's, whose content argument is a lambda holding RouteB.Top's own real
+        // navigateTo calls. Before the fix, that lambda was scanned as if it were reachable from
+        // RouteC, producing RouteC's edges as an exact, target-for-target copy of RouteB.Top's own
+        // edges - including a nonsensical self-loop, since one of RouteB.Top's real edges targets
+        // RouteC itself.
+        val shared = parser.parse(
+            "Shared.kt",
+            """
+            package com.example.shared
+
+            fun FeatureScaffold(onBack: () -> Unit, content: () -> Unit) {
+                TopBar(onBack)
+                content()
+            }
+            fun TopBar(onBack: () -> Unit) = Unit
+            """.trimIndent(),
+        )
+        val routeA = parser.parse(
+            "RouteA.kt",
+            """
+            package com.example.routea
+
+            import androidx.navigation3.runtime.NavKey
+
+            object RouteA : NavKey
+            """.trimIndent(),
+        )
+        val routeD = parser.parse(
+            "RouteD.kt",
+            """
+            package com.example.routed
+
+            import androidx.navigation3.runtime.NavKey
+
+            object RouteD : NavKey
+            """.trimIndent(),
+        )
+        val routeB = parser.parse(
+            "RouteB.kt",
+            """
+            package com.example.routeb
+
+            import androidx.navigation3.runtime.EntryProviderScope
+            import androidx.navigation3.runtime.NavKey
+            import androidx.navigation3.runtime.entry
+            import com.example.shared.FeatureScaffold
+            import com.example.routea.RouteA
+            import com.example.routec.RouteC
+            import com.example.routed.RouteD
+
+            sealed interface RouteB : NavKey {
+                object Top : RouteB
+                object Edit : RouteB
+            }
+
+            fun EntryProviderScope<NavKey>.routeBNavEntries(navigateTo: (NavKey) -> Unit, popBack: () -> Unit) {
+                entry<RouteB.Top> {
+                    FeatureScaffold(onBack = {}, content = {
+                        RouteBTopScreen(
+                            onEditClick = { navigateTo(RouteB.Edit) },
+                            onGoC = { navigateTo(RouteC) },
+                            onGoA = { navigateTo(RouteA) },
+                            onGoD = { navigateTo(RouteD) },
+                        )
+                    })
+                }
+                entry<RouteB.Edit> { RouteBEditScreen(onBack = popBack) }
+            }
+
+            fun RouteBTopScreen(
+                onEditClick: () -> Unit,
+                onGoC: () -> Unit,
+                onGoA: () -> Unit,
+                onGoD: () -> Unit,
+            ) = Unit
+            fun RouteBEditScreen(onBack: () -> Unit) = Unit
+            """.trimIndent(),
+        )
+        val routeC = parser.parse(
+            "RouteC.kt",
+            """
+            package com.example.routec
+
+            import androidx.navigation3.runtime.EntryProviderScope
+            import androidx.navigation3.runtime.NavKey
+            import androidx.navigation3.runtime.entry
+            import com.example.shared.FeatureScaffold
+
+            object RouteC : NavKey
+
+            fun EntryProviderScope<NavKey>.routeCNavEntries(popBack: () -> Unit) {
+                entry<RouteC> { FeatureCScreen(onBack = popBack) }
+            }
+
+            fun FeatureCScreen(onBack: () -> Unit) {
+                FeatureScaffold(onBack = onBack, content = { FeatureCBody() })
+            }
+
+            fun FeatureCBody() = Unit
+            """.trimIndent(),
+        )
+        val appNavHost = parser.parse(
+            "AppNavHost.kt",
+            """
+            package com.example.app
+
+            import androidx.navigation3.runtime.NavKey
+            import androidx.navigation3.runtime.entry
+            import androidx.navigation3.runtime.entryProvider
+            import com.example.routea.RouteA
+            import com.example.routeb.routeBNavEntries
+            import com.example.routec.routeCNavEntries
+            import com.example.routed.RouteD
+
+            fun AppNavHost(navigateTo: (NavKey) -> Unit, popBack: () -> Unit) {
+                entryProvider<NavKey> {
+                    entry<RouteA> { RouteAScreen() }
+                    routeBNavEntries(navigateTo = navigateTo, popBack = popBack)
+                    routeCNavEntries(popBack = popBack)
+                    entry<RouteD> { RouteDScreen() }
+                }
+            }
+
+            fun RouteAScreen() = Unit
+            fun RouteDScreen() = Unit
+            """.trimIndent(),
+        )
+
+        val result = NavEdgeScanner().scan(listOf(shared, routeA, routeD, routeB, routeC, appNavHost))
+
+        // RouteB.Top's own 4 real edges must survive untouched.
+        assertEquals(
+            setOf(
+                NavEdge("com.example.routeb.RouteB.Top", "com.example.routeb.RouteB.Edit"),
+                NavEdge("com.example.routeb.RouteB.Top", "com.example.routec.RouteC"),
+                NavEdge("com.example.routeb.RouteB.Top", "com.example.routea.RouteA"),
+                NavEdge("com.example.routeb.RouteB.Top", "com.example.routed.RouteD"),
+            ),
+            result.edges.toSet(),
+        )
+        // In particular, RouteC must contribute nothing at all - no copy of RouteB.Top's edges, and
+        // no self-loop.
+        assertTrue(
+            result.edges.none { it.sourceRouteQualifiedName == "com.example.routec.RouteC" },
+            "expected zero edges from RouteC but found: " +
+                result.edges.filter { it.sourceRouteQualifiedName == "com.example.routec.RouteC" },
+        )
+    }
 }
