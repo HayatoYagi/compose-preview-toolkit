@@ -415,12 +415,19 @@ private class CallGraphTraversal(
      * parameter is itself invoked in its body, [expandParameterInvocation] finds every call site of
      * the wrapper project-wide and, for each one, threads through here — including a call site that
      * lives inside some unrelated aggregator route's own registration, whose `content` argument is a
-     * lambda holding that aggregator's own, entirely real `navigateTo(...)` calls. Scanning that
-     * lambda here would misattribute the aggregator's own edges to whatever route's search happened
-     * to reach the shared wrapper - checked by walking up [expression]'s PSI ancestors rather than
-     * requiring exact identity, since the leaking lambda is typically nested several calls deep
-     * inside the other registration's trailing lambda (as in the Scaffold example above), not
-     * necessarily written as its immediate body.
+     * lambda (or, equally, a callable reference — see [resolveBoundExpression]'s
+     * `KtCallableReferenceExpression` branch, which passes the reference expression itself, not its
+     * resolved target's body) holding that aggregator's own, entirely real `navigateTo(...)` calls.
+     * Scanning that argument here would misattribute the aggregator's own edges to whatever route's
+     * search happened to reach the shared wrapper - checked by walking up [expression]'s PSI
+     * ancestors rather than requiring exact identity, since the leaking argument is typically nested
+     * several calls deep inside the other registration's trailing lambda (as in the Scaffold example
+     * above), not necessarily written as its immediate body. Deliberately takes the *bound argument
+     * expression itself* (as written at its call site), never the callable reference's resolved
+     * target — an ordinary named function reached this way (e.g. `RouteBTopContent` in the example
+     * above) is not itself nested inside anything and would never trip this check if it were passed
+     * the target instead, which is exactly how this leak survived scanning only the lambda-literal
+     * form of the same mistake.
      */
     private fun blockedAsAnotherRoutesEntryRegistration(expression: KtExpression): Boolean {
         var current: PsiElement? = expression
@@ -470,6 +477,13 @@ private class CallGraphTraversal(
                 queue.add(SearchContext(body, depth, closureOwner?.functionTypedParamNames().orEmpty(), closureOwner))
             }
             is KtCallableReferenceExpression -> {
+                // Checked against the reference expression itself (as written at its call site),
+                // not the function it resolves to: an ordinary named function's own body is never
+                // "nested inside" anything, so only the call site's own lexical position can reveal
+                // that this callable reference is another route's own registration wiring being
+                // passed through a shared wrapper (see blockedAsAnotherRoutesEntryRegistration's
+                // kdoc for the full scenario).
+                if (blockedAsAnotherRoutesEntryRegistration(expression)) return
                 val refName = expression.callableReference.getReferencedName()
                 val target = resolver.resolveFunction(refName, expression.containingKtFile, expression) ?: return
                 if (blockedAsEntryHostingFunction(target)) return

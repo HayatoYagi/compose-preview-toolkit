@@ -1049,4 +1049,162 @@ class NavEdgeScannerTest {
                 result.edges.filter { it.sourceRouteQualifiedName == "com.example.routec.RouteC" },
         )
     }
+
+    @Test
+    fun `a route reached only via a shared wrapper's content slot must not inherit an unrelated aggregator's own navigateTo calls, when the aggregator binds content by callable reference instead of an inline lambda`() {
+        // Same false-positive mechanism and same fixture shape as the test above, but RouteB.Top
+        // binds FeatureScaffold's content slot with a callable reference (::RouteBTopContent)
+        // instead of writing the navigate-laden code as an inline lambda literal at the call site.
+        // resolveBoundExpression's `is KtCallableReferenceExpression` branch is only guarded against
+        // re-entering an entryHostingFunction (a function that itself hosts entry<X> {} calls) - it
+        // is NOT guarded against resolving into a plain named function whose *call site* (the
+        // `::RouteBTopContent` reference expression itself) is lexically nested inside a *different*
+        // route's own entry<X> {} registration lambda, the way the lambda-literal branch now is.
+        // RouteBTopContent itself is an ordinary function, not an entry-hosting one, so
+        // blockedAsEntryHostingFunction never triggers - if this reproduces the leak, it is a
+        // distinct, still-unfixed gap in the existing guard rather than the same mechanism restated.
+        val shared = parser.parse(
+            "Shared.kt",
+            """
+            package com.example.shared
+
+            fun FeatureScaffold(onBack: () -> Unit, content: () -> Unit) {
+                TopBar(onBack)
+                content()
+            }
+            fun TopBar(onBack: () -> Unit) = Unit
+            """.trimIndent(),
+        )
+        val routeA = parser.parse(
+            "RouteA.kt",
+            """
+            package com.example.routea
+
+            import androidx.navigation3.runtime.NavKey
+
+            object RouteA : NavKey
+            """.trimIndent(),
+        )
+        val routeD = parser.parse(
+            "RouteD.kt",
+            """
+            package com.example.routed
+
+            import androidx.navigation3.runtime.NavKey
+
+            object RouteD : NavKey
+            """.trimIndent(),
+        )
+        val routeB = parser.parse(
+            "RouteB.kt",
+            """
+            package com.example.routeb
+
+            import androidx.navigation3.runtime.EntryProviderScope
+            import androidx.navigation3.runtime.NavKey
+            import androidx.navigation3.runtime.entry
+            import com.example.shared.FeatureScaffold
+            import com.example.routea.RouteA
+            import com.example.routec.RouteC
+            import com.example.routed.RouteD
+
+            sealed interface RouteB : NavKey {
+                object Top : RouteB
+                object Edit : RouteB
+            }
+
+            fun EntryProviderScope<NavKey>.routeBNavEntries(popBack: () -> Unit) {
+                entry<RouteB.Top> {
+                    FeatureScaffold(onBack = {}, content = ::RouteBTopContent)
+                }
+                entry<RouteB.Edit> { RouteBEditScreen(onBack = popBack) }
+            }
+
+            // A plain top-level function - written directly in navigateTo-call form (matching
+            // pattern (i)'s inline shape) so this fixture doesn't need to also thread a navigateTo
+            // parameter through a callable reference target, which is a separate, unrelated
+            // question from the one this test is isolating.
+            fun RouteBTopContent() {
+                navigateTo(RouteB.Edit)
+                navigateTo(RouteC)
+                navigateTo(RouteA)
+                navigateTo(RouteD)
+            }
+
+            fun navigateTo(route: NavKey) = Unit
+            fun RouteBEditScreen(onBack: () -> Unit) = Unit
+            """.trimIndent(),
+        )
+        val routeC = parser.parse(
+            "RouteC.kt",
+            """
+            package com.example.routec
+
+            import androidx.navigation3.runtime.EntryProviderScope
+            import androidx.navigation3.runtime.NavKey
+            import androidx.navigation3.runtime.entry
+            import com.example.shared.FeatureScaffold
+
+            object RouteC : NavKey
+
+            fun EntryProviderScope<NavKey>.routeCNavEntries(popBack: () -> Unit) {
+                entry<RouteC> { FeatureCScreen(onBack = popBack) }
+            }
+
+            fun FeatureCScreen(onBack: () -> Unit) {
+                FeatureScaffold(onBack = onBack, content = { FeatureCBody() })
+            }
+
+            fun FeatureCBody() = Unit
+            """.trimIndent(),
+        )
+        val appNavHost = parser.parse(
+            "AppNavHost.kt",
+            """
+            package com.example.app
+
+            import androidx.navigation3.runtime.NavKey
+            import androidx.navigation3.runtime.entry
+            import androidx.navigation3.runtime.entryProvider
+            import com.example.routea.RouteA
+            import com.example.routeb.routeBNavEntries
+            import com.example.routec.routeCNavEntries
+            import com.example.routed.RouteD
+
+            fun AppNavHost(popBack: () -> Unit) {
+                entryProvider<NavKey> {
+                    entry<RouteA> { RouteAScreen() }
+                    routeBNavEntries(popBack = popBack)
+                    routeCNavEntries(popBack = popBack)
+                    entry<RouteD> { RouteDScreen() }
+                }
+            }
+
+            fun RouteAScreen() = Unit
+            fun RouteDScreen() = Unit
+            """.trimIndent(),
+        )
+
+        val result = NavEdgeScanner().scan(listOf(shared, routeA, routeD, routeB, routeC, appNavHost))
+
+        // RouteB.Top's own 4 real edges (via RouteBTopContent, reached by callable reference) must
+        // survive untouched - same real-edge set as the inline-lambda variant above.
+        assertEquals(
+            setOf(
+                NavEdge("com.example.routeb.RouteB.Top", "com.example.routeb.RouteB.Edit"),
+                NavEdge("com.example.routeb.RouteB.Top", "com.example.routec.RouteC"),
+                NavEdge("com.example.routeb.RouteB.Top", "com.example.routea.RouteA"),
+                NavEdge("com.example.routeb.RouteB.Top", "com.example.routed.RouteD"),
+            ),
+            result.edges.filter { it.sourceRouteQualifiedName == "com.example.routeb.RouteB.Top" }.toSet(),
+        )
+        // In particular, RouteC must contribute nothing at all - no copy of RouteB.Top's edges, and
+        // no self-loop. This is what fails if the KtCallableReferenceExpression branch's missing
+        // blockedAsAnotherRoutesEntryRegistration guard is the still-unfixed leak.
+        assertTrue(
+            result.edges.none { it.sourceRouteQualifiedName == "com.example.routec.RouteC" },
+            "expected zero edges from RouteC but found: " +
+                result.edges.filter { it.sourceRouteQualifiedName == "com.example.routec.RouteC" },
+        )
+    }
 }
