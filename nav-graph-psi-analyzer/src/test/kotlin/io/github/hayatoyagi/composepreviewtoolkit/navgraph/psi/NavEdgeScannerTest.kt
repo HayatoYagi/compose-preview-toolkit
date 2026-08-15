@@ -533,6 +533,71 @@ class NavEdgeScannerTest {
     }
 
     @Test
+    fun `a bare reference disambiguated via the call site's own import, idiomatic Kotlin's avoid-repeating-the-qualifier pattern`() {
+        // Same sibling shape as the two tests above, but this time the routes are declared in one
+        // file and the navigate call lives in a *different* file that writes
+        // `import com.example.siblingsimport.TodoRoute.Detail` and then calls `navigateTo(Detail)`
+        // bare - the idiomatic-Kotlin way to avoid repeating the qualifier at every call site.
+        // There's no written qualifier at the call site to narrow with (same as the bare-reference
+        // test above), but the import alone is enough to pick TodoRoute.Detail over NoteRoute.Detail
+        // without needing type resolution.
+        val routes = parser.parse(
+            "SiblingRoutesForImport.kt",
+            """
+            package com.example.siblingsimport
+
+            import androidx.navigation3.runtime.NavKey
+            import androidx.navigation3.runtime.entry
+
+            sealed interface TodoRoute : NavKey {
+                object Detail : TodoRoute
+            }
+
+            sealed interface NoteRoute : NavKey {
+                object Detail : NoteRoute
+            }
+
+            fun registerSiblingDetails() {
+                entry<TodoRoute.Detail> { TodoDetailScreen() }
+                entry<NoteRoute.Detail> { NoteDetailScreen() }
+            }
+
+            fun TodoDetailScreen() = Unit
+            fun NoteDetailScreen() = Unit
+            """.trimIndent(),
+        )
+        val appNavHost = parser.parse(
+            "AppNavHostForImport.kt",
+            """
+            package com.example.appimport
+
+            import androidx.navigation3.runtime.NavKey
+            import androidx.navigation3.runtime.entry
+            import com.example.siblingsimport.TodoRoute.Detail
+
+            object ListRoute : NavKey
+
+            fun registerAppImport() {
+                entry<ListRoute> { navigateTo(Detail) }
+            }
+
+            fun navigateTo(route: NavKey) = Unit
+            """.trimIndent(),
+        )
+
+        val result = NavEdgeScanner().scan(listOf(routes, appNavHost))
+
+        assertEquals(
+            listOf(NavEdge("com.example.appimport.ListRoute", "com.example.siblingsimport.TodoRoute.Detail")),
+            result.edges,
+        )
+        assertTrue(
+            result.warnings.none { it.contains("ambiguous", ignoreCase = true) },
+            "expected no ambiguity warning but got: ${result.warnings}",
+        )
+    }
+
+    @Test
     fun `a callback relying purely on type inference, with no explicit annotation, is not found - known limitation`() {
         // Matches the documented gap: a local val lambda with an untyped parameter is invisible to
         // this purely-syntactic scanner regardless of naming, since it isn't even tracked as a live
