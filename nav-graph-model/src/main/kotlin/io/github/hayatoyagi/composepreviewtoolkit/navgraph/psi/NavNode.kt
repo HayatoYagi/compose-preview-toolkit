@@ -5,7 +5,7 @@ package io.github.hayatoyagi.composepreviewtoolkit.navgraph.psi
  * `nav-graph-psi-analyzer`'s `NavNodeScanner`). Mirrors the shape of KSP's
  * `KSClassDeclaration.qualifiedName` reporting for a nested declaration: [qualifiedName] is the
  * package-qualified, dot-joined outer-to-inner simple-name chain (e.g.
- * `com.example.ConsultRoute.Detail` for a route nested inside a sealed hierarchy), not necessarily
+ * `com.example.TodoRoute.Detail` for a route nested inside a sealed hierarchy), not necessarily
  * the route's own file location.
  *
  * [filePath]/[line] locate the `entry<X> { ... }` registration call site itself (not the bare
