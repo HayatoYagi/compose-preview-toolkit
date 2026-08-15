@@ -3,8 +3,8 @@ package io.github.hayatoyagi.composepreviewtoolkit.navgraph.psi
 /**
  * A single navigation edge discovered by `nav-graph-psi-analyzer`'s `NavEdgeScanner`: starting
  * from [sourceRouteQualifiedName]'s `entry<X> { ... }` registration, a bounded-depth call-graph
- * search found a `navigateTo`/`navigate`-shaped call reachable whose first argument resolved to
- * [targetRouteQualifiedName].
+ * search found a reachable call mutating the app's tracked `NavBackStack` whose route argument
+ * resolved to [targetRouteQualifiedName].
  *
  * Like [NavNode], this is a *syntactic*, best-effort result — no type resolution is involved, so
  * an edge here means "found by name-based analysis", not "verified by the compiler".
