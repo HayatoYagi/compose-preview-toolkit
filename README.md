@@ -173,7 +173,7 @@ A **separate** plugin id, `io.github.hayatoyagi.compose-preview-toolkit.navgraph
 [Gradle/Kotlin requirements](#requirements) as Screenshot Testing above but neither AGP's
 screenshot-testing alpha feature nor KSP. It statically scans every discovered module's
 `src/main/kotlin` for Navigation3 `entry<Route> { ... }` registrations (nodes) and
-`navigateTo`/`navigate`-shaped calls reachable from each one via a bounded-depth call-graph search
+declared-callback-type navigate calls reachable from each one via a bounded-depth call-graph search
 (edges):
 
 ```kotlin
@@ -186,15 +186,15 @@ plugins {
 Only needs to be applied where you run `generateDebugNavGraphSite` — a dependency module is
 discovered and scanned via its dependents without applying this plugin there too.
 
-Edge detection is best-effort, not type resolution, and recognizes a terminal navigate call two
-independent ways: by callee name (configurable `navigateCallNames`, e.g. `navigateTo(...)`) or by
-declared type — a live callback invoked with a parameter type of `NavKey` (or a known route), as
-written, however it's named (e.g. `onSelectRoute: (NavKey) -> Unit`). A call matching either way is
-an edge; neither requires the other. Ambiguous callee names and calls beyond the configured depth
-are dropped with a warning rather than guessed, and there's no escape-hatch annotation for gaps —
-if the scanner misses something real, the scanner should improve rather than asking you to annotate
-your navigation code. Configure via `composePreviewToolkitNavGraph { ... }`'s `entryFunctionNames`,
-`navigateCallNames`, and `callGraphResolutionDepth`.
+Edge detection is best-effort, not type resolution: a terminal navigate call is recognized by
+declared callback type — a live function-typed parameter invoked directly whose *declared*
+function-type signature, as written, has a parameter type of `NavKey` (or a known route), however
+that parameter is named (e.g. `onSelectRoute: (NavKey) -> Unit`). Purely syntactic — a parameter
+with no explicit type annotation (relying purely on Kotlin type inference) isn't matched. Ambiguous
+callee names and calls beyond the configured depth are dropped with a warning rather than guessed,
+and there's no escape-hatch annotation for gaps — if the scanner misses something real, the scanner
+should improve rather than asking you to annotate your navigation code. Configure via
+`composePreviewToolkitNavGraph { ... }`'s `entryFunctionNames` and `callGraphResolutionDepth`.
 
 ### Gallery site (nodes + edges + screenshots)
 
@@ -275,8 +275,10 @@ generated from this same sample on every push to `main`.
 - AGP's Compose Preview Screenshot Testing is still an alpha feature (`0.0.1-alpha1x` as of this
   writing); breaking changes upstream may require a plugin update.
 - The nav-graph plugin's node/edge analysis is syntactic, not type-resolved, throughout (see "Nav
-  Graph" above for its two edge-detection modes), so results are best-effort; node↔screenshot
-  matching is a configurable naming heuristic, not a guaranteed pairing.
+  Graph" above for its declared-callback-type edge detection), so results are best-effort — a
+  navigate callback relying purely on Kotlin type inference, with no explicit type annotation
+  anywhere along its chain, isn't found; node↔screenshot matching is a configurable naming
+  heuristic, not a guaranteed pairing.
 
 ## Contributing
 

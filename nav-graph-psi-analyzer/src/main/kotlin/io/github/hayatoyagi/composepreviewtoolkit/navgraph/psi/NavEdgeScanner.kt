@@ -48,18 +48,7 @@ data class NavEdgeScanResult(
  *
  * Within a context's subtree, every name reference is classified once, in priority order:
  *
- * 1. **Navigate call by name**: the reference is a call's callee and its simple name is in
- *    [navigateCallNames] → inspect the call's first argument, read as its own dotted reference
- *    chain (e.g. `["TodoRoute", "Detail"]` for a qualified reference/constructor call
- *    `TodoRoute.Detail`, or just `["Detail"]` for a bare one). Every chain, qualified or bare,
- *    unambiguous or not, is resolved the same way to a single canonical fully-qualified name before
- *    any route lookup happens: its root identifier is resolved to its own real qualified name via
- *    the call site's file imports if one matches, else assumed to resolve within the call site's own
- *    file package, and the rest of the chain is appended onto that. That exact fully-qualified name
- *    is then looked up among known routes - a hit is the target, unconditionally; a miss means the
- *    call is dropped with a warning rather than guessed (see
- *    [CallGraphTraversal.resolveQualifiedTarget]'s kdoc). Terminal — not traversed further.
- * 2. **Parameter reference**: the reference's simple name matches a function-typed parameter that
+ * 1. **Parameter reference**: the reference's simple name matches a function-typed parameter that
  *    is live in the current context — *regardless* of whether the reference is itself a call's
  *    callee (`onClick()`) or merely passed along as a value to some other call
  *    (`Button(onClick = onProceedClick)`), since from a reachability standpoint both mean
@@ -77,25 +66,35 @@ data class NavEdgeScanResult(
  *    it's additionally checked as a **navigate call by declared type**: if the parameter's
  *    function-type signature, as written (e.g. `(NavKey) -> Unit`), has a parameter type whose
  *    simple name is `NavKey` or one of the routes found by [NavNodeScanner], this call site is
- *    treated as a terminal navigate edge exactly like case 1 — same argument resolution, run
- *    alongside the reachability threading above rather than replacing it. Purely syntactic: a
- *    parameter with no explicit type annotation is never matched this way.
- * 3. **Known function call**: the reference is a call's callee and its simple name resolves
+ *    treated as a terminal navigate edge — inspect the call's first argument, read as its own
+ *    dotted reference chain (e.g. `["TodoRoute", "Detail"]` for a qualified reference/constructor
+ *    call `TodoRoute.Detail`, or just `["Detail"]` for a bare one). Every chain, qualified or bare,
+ *    unambiguous or not, is resolved the same way to a single canonical fully-qualified name before
+ *    any route lookup happens: its root identifier is resolved to its own real qualified name via
+ *    the call site's file imports if one matches, else assumed to resolve within the call site's own
+ *    file package, and the rest of the chain is appended onto that. That exact fully-qualified name
+ *    is then looked up among known routes - a hit is the target, unconditionally; a miss means the
+ *    call is dropped with a warning rather than guessed (see
+ *    [CallGraphTraversal.resolveQualifiedTarget]'s kdoc). Terminal — not traversed further. Purely
+ *    syntactic: a parameter with no explicit type annotation is never matched this way, and this
+ *    runs alongside the reachability threading above rather than replacing it.
+ * 2. **Known function call**: the reference is a call's callee and its simple name resolves
  *    unambiguously to another parsed [KtNamedFunction] → continue the search from that function's
  *    body at depth + 1, with that function's *own* function-typed parameters as the new live set
  *    (Kotlin scoping: a callee's parameters are not the caller's).
- * 4. Otherwise → ignored. This is the common case (framework/library calls like `Button`, `Column`,
- *    `println` with no matching declaration among the parsed files) and is expected, not an error.
+ * 3. Otherwise → ignored. This is the common case (framework/library calls like `Button`, `Column`,
+ *    `println`, and even a `navigateTo(...)`-named call with no declared-type-matching callback
+ *    behind it) and is expected, not an error.
  *
  * A context is only ever processed once per entry registration (tracked by referential identity),
  * which is what guarantees termination in the presence of cycles (mutually recursive functions) —
  * BFS order means the first time a given PSI subtree is reached is always via a shortest path, so
  * revisiting it later via a longer path is always safe to skip.
  *
- * Callee-name resolution is deliberately simple-name-based with no type resolution (per the design
- * doc's explicit choice): a same-package match is preferred, then an explicit import match: if
- * still ambiguous, the call is dropped with a warning rather than guessed. Matching a
- * `navigateTo(...)` call's first argument against the route registry follows the same
+ * Callee-name resolution (case 2 above) is deliberately simple-name-based with no type resolution
+ * (per the design doc's explicit choice): a same-package match is preferred, then an explicit
+ * import match; if still ambiguous, the call is dropped with a warning rather than guessed.
+ * Matching a navigate call's first argument against the route registry follows the same
  * type-resolution-free philosophy, but resolves the written reference to one canonical
  * fully-qualified name via import-then-same-package first (see
  * [CallGraphTraversal.resolveQualifiedTarget]'s kdoc) rather than filtering candidates by name,
@@ -103,10 +102,14 @@ data class NavEdgeScanResult(
  * share their trailing segments apart. `NavKey` is the one type name matched literally throughout —
  * it's `androidx.navigation3.runtime.NavKey`, a fixed library API, not a project-specific naming
  * convention.
+ *
+ * Detection is purely by declared callback type, not by callee name — a project whose
+ * navigation callback carries no explicit type annotation anywhere along its chain (relying purely
+ * on Kotlin type inference) is a known gap this scanner doesn't fill; see
+ * [NavEdgeScannerTest]'s "known limitation" test.
  */
 class NavEdgeScanner(
     private val entryFunctionNames: Set<String> = DEFAULT_ENTRY_FUNCTION_NAMES,
-    private val navigateCallNames: Set<String> = DEFAULT_NAVIGATE_CALL_NAMES,
     private val callGraphResolutionDepth: Int = DEFAULT_CALL_GRAPH_RESOLUTION_DEPTH,
 ) {
     fun scan(files: List<KtFile>): NavEdgeScanResult {
@@ -138,7 +141,6 @@ class NavEdgeScanner(
             val owningFunction = PsiTreeUtil.getParentOfType(registration.call, KtNamedFunction::class.java)
             val traversal = CallGraphTraversal(
                 sourceRoute = registration.node.qualifiedName,
-                navigateCallNames = navigateCallNames,
                 routeSimpleNames = routeSimpleNames,
                 routesByQualifiedName = routesByQualifiedName,
                 resolver = resolver,
@@ -253,7 +255,6 @@ private data class SearchContext(
  */
 private class CallGraphTraversal(
     private val sourceRoute: String,
-    private val navigateCallNames: Set<String>,
     private val routeSimpleNames: Set<String>,
     private val routesByQualifiedName: Map<String, NavNode>,
     private val resolver: CalleeResolver,
@@ -287,7 +288,6 @@ private class CallGraphTraversal(
             val enclosingCall = ref.parent as? KtCallExpression
             val isCallee = enclosingCall?.calleeExpression === ref
             when {
-                isCallee && name in navigateCallNames -> handleNavigateCall(enclosingCall, edges)
                 context.owningFunction != null && name in context.liveParams -> {
                     if (isCallee) {
                         handleTypedParameterInvocation(name, context.owningFunction, enclosingCall, edges)

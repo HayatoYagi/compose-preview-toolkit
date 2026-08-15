@@ -79,9 +79,6 @@ abstract class GenerateDebugNavGraphSite @Inject constructor(
     abstract val entryFunctionNames: SetProperty<String>
 
     @get:Input
-    abstract val navigateCallNames: SetProperty<String>
-
-    @get:Input
     abstract val callGraphResolutionDepth: Property<Int>
 
     /**
@@ -126,7 +123,6 @@ abstract class GenerateDebugNavGraphSite @Inject constructor(
         workQueue.submit(NavGraphScanWorkAction::class.java) { params ->
             params.sourceFiles.from(edgeSourceFiles)
             params.entryFunctionNames.set(entryFunctionNames)
-            params.navigateCallNames.set(navigateCallNames)
             params.callGraphResolutionDepth.set(callGraphResolutionDepth)
             params.fallbackBaseDirectory.set(projectDirectory)
             params.outputFile.set(scanResultFile)

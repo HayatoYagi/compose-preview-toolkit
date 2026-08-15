@@ -3,7 +3,6 @@ package io.github.hayatoyagi.composepreviewtoolkit.gradle
 import io.github.hayatoyagi.composepreviewtoolkit.ksp.ScreenshotPreviewProcessorProvider
 import io.github.hayatoyagi.composepreviewtoolkit.navgraph.psi.DEFAULT_CALL_GRAPH_RESOLUTION_DEPTH
 import io.github.hayatoyagi.composepreviewtoolkit.navgraph.psi.DEFAULT_ENTRY_FUNCTION_NAMES
-import io.github.hayatoyagi.composepreviewtoolkit.navgraph.psi.DEFAULT_NAVIGATE_CALL_NAMES
 import org.gradle.api.Plugin
 import org.gradle.api.Project
 import org.gradle.api.artifacts.component.ProjectComponentIdentifier
@@ -58,7 +57,6 @@ class ComposePreviewToolkitNavGraphPlugin : Plugin<Project> {
             ComposePreviewToolkitNavGraphExtension::class.java,
         ).apply {
             entryFunctionNames.convention(DEFAULT_ENTRY_FUNCTION_NAMES)
-            navigateCallNames.convention(DEFAULT_NAVIGATE_CALL_NAMES)
             callGraphResolutionDepth.convention(DEFAULT_CALL_GRAPH_RESOLUTION_DEPTH)
             routeNameSuffixesToStrip.convention(setOf("Destination", "Route"))
         }
@@ -72,7 +70,6 @@ class ComposePreviewToolkitNavGraphPlugin : Plugin<Project> {
             target.tasks.register("generateDebugNavGraphSite", GenerateDebugNavGraphSite::class.java) { task ->
                 task.routeNameSuffixesToStrip.set(extension.routeNameSuffixesToStrip)
                 task.entryFunctionNames.set(extension.entryFunctionNames)
-                task.navigateCallNames.set(extension.navigateCallNames)
                 task.callGraphResolutionDepth.set(extension.callGraphResolutionDepth)
                 // Fallback-only: only consulted for a node's filePath when the git repo root can't
                 // be determined.

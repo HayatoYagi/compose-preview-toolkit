@@ -20,13 +20,6 @@ abstract class ComposePreviewToolkitNavGraphExtension {
     abstract val entryFunctionNames: SetProperty<String>
 
     /**
-     * Callee simple names treated as `navigateTo`/`navigate`-shaped calls when scanning for nav
-     * graph edges. Defaults to `nav-graph-psi-analyzer`'s `DEFAULT_NAVIGATE_CALL_NAMES`
-     * (`["navigateTo", "navigate"]`).
-     */
-    abstract val navigateCallNames: SetProperty<String>
-
-    /**
      * Upper bound on how many call-graph hops [io.github.hayatoyagi.composepreviewtoolkit.navgraph.psi.NavEdgeScanner]'s
      * bounded-depth breadth-first search will traverse from an `entry<X> { ... }` block before
      * giving up on a candidate edge (with a warning, never a build failure). Defaults to

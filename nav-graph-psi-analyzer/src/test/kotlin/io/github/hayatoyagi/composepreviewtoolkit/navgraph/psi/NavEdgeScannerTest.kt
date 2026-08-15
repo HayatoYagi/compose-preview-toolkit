@@ -23,11 +23,12 @@ class NavEdgeScannerTest {
 
     @Test
     fun `pattern (i) callback-threaded and inline edges are both found, mirroring the real sample's exact shape`() {
-        // Mirrors sample/app/AppNavHost.kt + sample/feature-a exactly: HomeRoute's navigateTo is
-        // written inline in the entry block; FeatureARoute's is threaded up through
+        // Mirrors sample/app/AppNavHost.kt + sample/feature-a exactly: HomeRoute's navigate call is
+        // written inline in the entry block, invoking a declared-type callback parameter of the
+        // enclosing appNavHost() function directly; FeatureARoute's is threaded up through
         // featureANavEntries's onProceedClick parameter, forwarded once more through
-        // FeatureAScreen's own onProceedClick parameter, and only actually called from
-        // AppNavHost's own call site of featureANavEntries.
+        // FeatureAScreen's own onProceedClick parameter, and only actually invokes that same
+        // declared-type callback from AppNavHost's own call site of featureANavEntries.
         val appNavHost = parser.parse(
             "AppNavHost.kt",
             """
@@ -42,16 +43,15 @@ class NavEdgeScannerTest {
 
             object HomeRoute : NavKey
 
-            fun appNavHost() {
+            fun appNavHost(onNavigate: (NavKey) -> Unit) {
                 entryProvider<NavKey> {
                     entry<HomeRoute> {
-                        HomeScreen(onGoToFeatureAClick = { navigateTo(FeatureARoute) })
+                        HomeScreen(onGoToFeatureAClick = { onNavigate(FeatureARoute) })
                     }
-                    featureANavEntries(onProceedClick = { navigateTo(FeatureBRoute) })
+                    featureANavEntries(onProceedClick = { onNavigate(FeatureBRoute) })
                 }
             }
 
-            fun navigateTo(route: NavKey) = Unit
             fun HomeScreen(onGoToFeatureAClick: () -> Unit) = Unit
             """.trimIndent(),
         )
@@ -102,72 +102,6 @@ class NavEdgeScannerTest {
                 NavEdge("com.example.featurea.FeatureARoute", "com.example.featureb.FeatureBRoute"),
             ),
             result.edges.toSet(),
-        )
-    }
-
-    @Test
-    fun `pattern (ii) direct navigateTo call, one level deep, with no callback parameter at all`() {
-        val file = parser.parse(
-            "FeatureC.kt",
-            """
-            package com.example.featurec
-
-            import androidx.navigation3.runtime.NavKey
-            import androidx.navigation3.runtime.entry
-
-            object FeatureCRoute : NavKey
-            object FeatureDRoute : NavKey
-
-            fun registerFeatureC() {
-                entry<FeatureCRoute> { restartFlow() }
-                entry<FeatureDRoute> { FeatureDScreen() }
-            }
-
-            fun restartFlow() {
-                navigateTo(FeatureDRoute)
-            }
-
-            fun FeatureDScreen() = Unit
-            fun navigateTo(route: NavKey) = Unit
-            """.trimIndent(),
-        )
-
-        val result = NavEdgeScanner().scan(listOf(file))
-
-        assertEquals(
-            listOf(NavEdge("com.example.featurec.FeatureCRoute", "com.example.featurec.FeatureDRoute")),
-            result.edges,
-        )
-    }
-
-    @Test
-    fun `pattern (ii) navigateTo called directly inside the entry block itself`() {
-        val file = parser.parse(
-            "FeatureE.kt",
-            """
-            package com.example.featuree
-
-            import androidx.navigation3.runtime.NavKey
-            import androidx.navigation3.runtime.entry
-
-            object FeatureERoute : NavKey
-            object FeatureFRoute : NavKey
-
-            fun registerFeatureE() {
-                entry<FeatureERoute> { navigate(FeatureFRoute) }
-                entry<FeatureFRoute> { FeatureFScreen() }
-            }
-
-            fun FeatureFScreen() = Unit
-            fun navigate(route: NavKey) = Unit
-            """.trimIndent(),
-        )
-
-        val result = NavEdgeScanner().scan(listOf(file))
-
-        assertEquals(
-            listOf(NavEdge("com.example.featuree.FeatureERoute", "com.example.featuree.FeatureFRoute")),
-            result.edges,
         )
     }
 
@@ -268,18 +202,17 @@ class NavEdgeScannerTest {
             object DeepRoute : NavKey
             object TargetRoute : NavKey
 
-            fun registerDeep() {
-                entry<DeepRoute> { level1() }
+            fun registerDeep(onNavigate: (NavKey) -> Unit) {
+                entry<DeepRoute> { level1(onNavigate) }
                 entry<TargetRoute> { TargetScreen() }
             }
 
-            fun level1() { level2() }
-            fun level2() { level3() }
-            fun level3() { level4() }
-            fun level4() { navigateTo(TargetRoute) }
+            fun level1(onNavigate: (NavKey) -> Unit) { level2(onNavigate) }
+            fun level2(onNavigate: (NavKey) -> Unit) { level3(onNavigate) }
+            fun level3(onNavigate: (NavKey) -> Unit) { level4(onNavigate) }
+            fun level4(onNavigate: (NavKey) -> Unit) { onNavigate(TargetRoute) }
 
             fun TargetScreen() = Unit
-            fun navigateTo(route: NavKey) = Unit
         """.trimIndent()
 
         val tooShallow = parser.parse("DeepTooShallow.kt", source())
@@ -444,7 +377,7 @@ class NavEdgeScannerTest {
     fun `a navigate call qualified with its parent route disambiguates between sealed-hierarchy siblings sharing a leaf name`() {
         // TodoRoute.Detail and NoteRoute.Detail are two different sealed-hierarchy siblings that
         // happen to share the leaf simple name "Detail" (see NavNode's own kdoc for this exact
-        // shape). navigateTo(TodoRoute.Detail) carries enough information in its own qualifier to
+        // shape). onNavigate(TodoRoute.Detail) carries enough information in its own qualifier to
         // pick the right one without guessing.
         val file = parser.parse(
             "SiblingRoutes.kt",
@@ -464,15 +397,14 @@ class NavEdgeScannerTest {
 
             object ListRoute : NavKey
 
-            fun registerSiblings() {
-                entry<ListRoute> { navigateTo(TodoRoute.Detail) }
+            fun registerSiblings(onNavigate: (NavKey) -> Unit) {
+                entry<ListRoute> { onNavigate(TodoRoute.Detail) }
                 entry<TodoRoute.Detail> { TodoDetailScreen() }
                 entry<NoteRoute.Detail> { NoteDetailScreen() }
             }
 
             fun TodoDetailScreen() = Unit
             fun NoteDetailScreen() = Unit
-            fun navigateTo(route: NavKey) = Unit
             """.trimIndent(),
         )
 
@@ -511,15 +443,14 @@ class NavEdgeScannerTest {
 
             object ListRoute : NavKey
 
-            fun registerBareSiblings() {
-                entry<ListRoute> { navigateTo(Detail) }
+            fun registerBareSiblings(onNavigate: (NavKey) -> Unit) {
+                entry<ListRoute> { onNavigate(Detail) }
                 entry<TodoRoute.Detail> { TodoDetailScreen() }
                 entry<NoteRoute.Detail> { NoteDetailScreen() }
             }
 
             fun TodoDetailScreen() = Unit
             fun NoteDetailScreen() = Unit
-            fun navigateTo(route: NavKey) = Unit
             """.trimIndent(),
         )
 
@@ -536,7 +467,7 @@ class NavEdgeScannerTest {
     fun `a bare reference disambiguated via the call site's own import, idiomatic Kotlin's avoid-repeating-the-qualifier pattern`() {
         // Same sibling shape as the two tests above, but this time the routes are declared in one
         // file and the navigate call lives in a *different* file that writes
-        // `import com.example.siblingsimport.TodoRoute.Detail` and then calls `navigateTo(Detail)`
+        // `import com.example.siblingsimport.TodoRoute.Detail` and then calls `onNavigate(Detail)`
         // bare - the idiomatic-Kotlin way to avoid repeating the qualifier at every call site.
         // There's no written qualifier at the call site to narrow with (same as the bare-reference
         // test above), but the import alone is enough to pick TodoRoute.Detail over NoteRoute.Detail
@@ -577,11 +508,9 @@ class NavEdgeScannerTest {
 
             object ListRoute : NavKey
 
-            fun registerAppImport() {
-                entry<ListRoute> { navigateTo(Detail) }
+            fun registerAppImport(onNavigate: (NavKey) -> Unit) {
+                entry<ListRoute> { onNavigate(Detail) }
             }
-
-            fun navigateTo(route: NavKey) = Unit
             """.trimIndent(),
         )
 
@@ -622,13 +551,12 @@ class NavEdgeScannerTest {
                 }
             }
 
-            fun register() {
-                entry<ListRoute> { navigateTo(TodoRoute.Detail) }
+            fun register(onNavigate: (NavKey) -> Unit) {
+                entry<ListRoute> { onNavigate(TodoRoute.Detail) }
                 entry<Foo.TodoRoute.Detail> { NestedDetailScreen() }
             }
 
             fun NestedDetailScreen() = Unit
-            fun navigateTo(route: NavKey) = Unit
             """.trimIndent(),
         )
 

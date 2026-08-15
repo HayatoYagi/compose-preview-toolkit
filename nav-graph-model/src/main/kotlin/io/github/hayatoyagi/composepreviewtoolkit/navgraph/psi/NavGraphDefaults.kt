@@ -9,9 +9,6 @@ package io.github.hayatoyagi.composepreviewtoolkit.navgraph.psi
  */
 val DEFAULT_ENTRY_FUNCTION_NAMES = setOf("entry")
 
-/** Default value for `NavEdgeScanner`'s `navigateCallNames`. */
-val DEFAULT_NAVIGATE_CALL_NAMES = setOf("navigateTo", "navigate")
-
 /**
  * Default bound for `NavEdgeScanner`'s breadth-first call-graph traversal. Chosen empirically:
  * against the real `sample/feature-a`/`sample/feature-b` wiring shape (a callback threaded one
