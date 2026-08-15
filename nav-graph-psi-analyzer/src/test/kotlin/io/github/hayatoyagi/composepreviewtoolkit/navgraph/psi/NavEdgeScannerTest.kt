@@ -642,6 +642,216 @@ class NavEdgeScannerTest {
     }
 
     @Test
+    fun `a callback pass-through that bottoms out at a local val (not a parameter) in a zero-param root composable dead-ends without leaking sibling edges`() {
+        // Regression test: FeatureCRoute's only reachable callback (onBack) is threaded up through
+        // featureCNavEntries -> AppNavHost -> App, where App's popBack is a *local val*, not a
+        // function parameter, inside App (which itself has zero parameters). Per
+        // resolveBoundExpression's pass-through branch, that must be a dead end: no edge for
+        // FeatureCRoute at all. In particular FeatureCRoute must NOT pick up the edge that belongs
+        // to featureANavEntries's own, entirely unrelated onSomeAction callback (wired to a sibling
+        // call in the same entryProvider block), nor a self-loop back to itself.
+        val appFile = parser.parse(
+            "App.kt",
+            """
+            package com.example.app
+
+            import androidx.navigation3.runtime.NavKey
+            import androidx.navigation3.runtime.entryProvider
+            import com.example.featurea.FeatureARoute
+            import com.example.featurea.featureANavEntries
+            import com.example.featureb.featureBNavEntries
+            import com.example.featurec.featureCNavEntries
+
+            fun AppNavHost(
+                popBack: () -> Unit,
+                navigateTo: (NavKey) -> Unit,
+            ) {
+                NavDisplay(
+                    entryProvider = entryProvider<NavKey> {
+                        featureANavEntries(onSomeAction = { navigateTo(FeatureARoute) })
+                        featureBNavEntries(onBack = popBack)
+                        featureCNavEntries(onBack = popBack)
+                    },
+                )
+            }
+
+            fun App() {
+                val popBack: () -> Unit = { restartApp() }
+                val navigateTo: (NavKey) -> Unit = { key -> pushRoute(key) }
+                AppNavHost(popBack = popBack, navigateTo = navigateTo)
+            }
+
+            fun NavDisplay(entryProvider: Any) = Unit
+            fun restartApp() = Unit
+            fun pushRoute(route: NavKey) = Unit
+            """.trimIndent(),
+        )
+        val featureA = parser.parse(
+            "FeatureANavEntries.kt",
+            """
+            package com.example.featurea
+
+            import androidx.navigation3.runtime.EntryProviderScope
+            import androidx.navigation3.runtime.NavKey
+            import androidx.navigation3.runtime.entry
+
+            object FeatureARoute : NavKey
+
+            fun EntryProviderScope<NavKey>.featureANavEntries(onSomeAction: () -> Unit) {
+                entry<FeatureARoute> { FeatureAScreen(onSomeAction) }
+            }
+
+            fun FeatureAScreen(onSomeAction: () -> Unit) = Unit
+            """.trimIndent(),
+        )
+        val featureB = parser.parse(
+            "FeatureBNavEntries.kt",
+            """
+            package com.example.featureb
+
+            import androidx.navigation3.runtime.EntryProviderScope
+            import androidx.navigation3.runtime.NavKey
+            import androidx.navigation3.runtime.entry
+
+            object FeatureBRoute : NavKey
+
+            fun EntryProviderScope<NavKey>.featureBNavEntries(onBack: () -> Unit) {
+                entry<FeatureBRoute> { FeatureBScreen(onBack) }
+            }
+
+            fun FeatureBScreen(onBack: () -> Unit) = Unit
+            """.trimIndent(),
+        )
+        val featureC = parser.parse(
+            "FeatureCNavEntries.kt",
+            """
+            package com.example.featurec
+
+            import androidx.navigation3.runtime.EntryProviderScope
+            import androidx.navigation3.runtime.NavKey
+            import androidx.navigation3.runtime.entry
+
+            object FeatureCRoute : NavKey
+
+            fun EntryProviderScope<NavKey>.featureCNavEntries(onBack: () -> Unit) {
+                entry<FeatureCRoute> { FeatureCScreen(onBack = onBack) }
+            }
+
+            fun FeatureCScreen(onBack: () -> Unit) {
+                FeatureCContent(onBack = onBack)
+            }
+
+            private fun FeatureCContent(onBack: () -> Unit) {
+                IconButton(onClick = onBack)
+            }
+
+            fun IconButton(onClick: () -> Unit) = Unit
+            """.trimIndent(),
+        )
+
+        val result = NavEdgeScanner().scan(listOf(appFile, featureA, featureB, featureC))
+
+        assertTrue(
+            result.edges.none { it.sourceRouteQualifiedName == "com.example.featurec.FeatureCRoute" },
+            "expected zero edges from FeatureCRoute (its only chain dead-ends at a local val) but found: " +
+                result.edges.filter { it.sourceRouteQualifiedName == "com.example.featurec.FeatureCRoute" },
+        )
+    }
+
+    @Test
+    fun `an onBack chain that transitively re-enters the nav-host composable must not leak that composable's unrelated sibling wiring`() {
+        // Regression test for a real false-positive edge. FeatureCRoute's onBack is bound, at its
+        // one wiring call site inside AppNavHost, to a lambda that calls resetNavigation() - a
+        // helper that (for a reason unrelated to FeatureCRoute, e.g. tearing down and rebuilding
+        // the whole nav graph on some error path) calls AppNavHost(...) again.
+        //
+        // Known-function-call resolution (case 3 in CallGraphTraversal's kdoc) then re-enters
+        // AppNavHost's *entire* body at the next depth - which also textually contains
+        // featureANavEntries's own, completely unrelated onSomeAction wiring, since that wiring's
+        // inline lambda argument is written at its call site *inside* AppNavHost, not inside
+        // featureANavEntries itself. Every navigateTo(...) found while scanning that reopened body
+        // was, before the fix, misattributed as reachable from FeatureCRoute - even though
+        // resetNavigation() rebuilding the nav graph from scratch says nothing about FeatureCRoute
+        // itself being able to reach FeatureARoute.
+        val appFile = parser.parse(
+            "App.kt",
+            """
+            package com.example.app
+
+            import androidx.navigation3.runtime.NavKey
+            import androidx.navigation3.runtime.entryProvider
+            import com.example.featurea.FeatureARoute
+            import com.example.featurea.featureANavEntries
+            import com.example.featurec.featureCNavEntries
+
+            fun AppNavHost(
+                popBack: () -> Unit,
+                navigateTo: (NavKey) -> Unit,
+            ) {
+                NavDisplay(
+                    entryProvider = entryProvider<NavKey> {
+                        featureANavEntries(onSomeAction = { navigateTo(FeatureARoute) })
+                        featureCNavEntries(onBack = { resetNavigation() })
+                    },
+                )
+            }
+
+            fun resetNavigation() {
+                AppNavHost(popBack = {}, navigateTo = {})
+            }
+
+            fun NavDisplay(entryProvider: Any) = Unit
+            """.trimIndent(),
+        )
+        val featureA = parser.parse(
+            "FeatureANavEntries.kt",
+            """
+            package com.example.featurea
+
+            import androidx.navigation3.runtime.EntryProviderScope
+            import androidx.navigation3.runtime.NavKey
+            import androidx.navigation3.runtime.entry
+
+            object FeatureARoute : NavKey
+
+            fun EntryProviderScope<NavKey>.featureANavEntries(onSomeAction: () -> Unit) {
+                entry<FeatureARoute> { FeatureAScreen(onSomeAction) }
+            }
+
+            fun FeatureAScreen(onSomeAction: () -> Unit) = Unit
+            """.trimIndent(),
+        )
+        val featureC = parser.parse(
+            "FeatureCNavEntries.kt",
+            """
+            package com.example.featurec
+
+            import androidx.navigation3.runtime.EntryProviderScope
+            import androidx.navigation3.runtime.NavKey
+            import androidx.navigation3.runtime.entry
+
+            object FeatureCRoute : NavKey
+
+            fun EntryProviderScope<NavKey>.featureCNavEntries(onBack: () -> Unit) {
+                entry<FeatureCRoute> { FeatureCScreen(onBack = onBack) }
+            }
+
+            fun FeatureCScreen(onBack: () -> Unit) = Unit
+            """.trimIndent(),
+        )
+
+        val result = NavEdgeScanner().scan(listOf(appFile, featureA, featureC))
+
+        // FeatureARoute's own edge (from its own onSomeAction wiring) is legitimate and must
+        // survive. FeatureCRoute must contribute nothing - resetNavigation() rebuilding the nav
+        // graph is not FeatureCRoute navigating anywhere.
+        assertEquals(
+            setOf(NavEdge("com.example.featurea.FeatureARoute", "com.example.featurea.FeatureARoute")),
+            result.edges.toSet(),
+        )
+    }
+
+    @Test
     fun `a callback relying purely on type inference, with no explicit annotation, is not found - known limitation`() {
         // Matches the documented gap: a local val lambda with an untyped parameter is invisible to
         // this purely-syntactic scanner regardless of naming, since it isn't even tracked as a live

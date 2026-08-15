@@ -83,14 +83,24 @@ data class NavEdgeScanResult(
  * 3. **Known function call**: the reference is a call's callee and its simple name resolves
  *    unambiguously to another parsed [KtNamedFunction] → continue the search from that function's
  *    body at depth + 1, with that function's *own* function-typed parameters as the new live set
- *    (Kotlin scoping: a callee's parameters are not the caller's).
+ *    (Kotlin scoping: a callee's parameters are not the caller's). Refused — dropped with a
+ *    warning, not traversed — when the resolved function is one of [NavEdgeScanner]'s
+ *    `entryHostingFunctions` (see [NavEdgeScanner.findEntryHostingFunctions]'s kdoc): a function
+ *    that hosts `entry<X> {}` registrations, directly or transitively, is nav-graph
+ *    *construction*, and re-entering its body from here would pull in every sibling registration
+ *    wired inside it — including their own, entirely unrelated navigate calls — as if they were
+ *    reachable from whatever route's search happened to rediscover it. The same refusal applies to
+ *    the equivalent callable-reference case in [resolveBoundExpression].
  * 4. Otherwise → ignored. This is the common case (framework/library calls like `Button`, `Column`,
  *    `println` with no matching declaration among the parsed files) and is expected, not an error.
  *
  * A context is only ever processed once per entry registration (tracked by referential identity),
  * which is what guarantees termination in the presence of cycles (mutually recursive functions) —
  * BFS order means the first time a given PSI subtree is reached is always via a shortest path, so
- * revisiting it later via a longer path is always safe to skip.
+ * revisiting it later via a longer path is always safe to skip. This is a narrower guarantee than
+ * it might look: it only dedupes *identical* PSI subtrees, and does nothing to stop a search from
+ * *legitimately* discovering an entirely different, much larger subtree via a real call edge — that
+ * is what the `entryHostingFunctions` refusal above exists to prevent.
  *
  * Callee-name resolution is deliberately simple-name-based with no type resolution (per the design
  * doc's explicit choice): a same-package match is preferred, then an explicit import match: if
@@ -131,6 +141,7 @@ class NavEdgeScanner(
         val routesByQualifiedName: Map<String, NavNode> = distinctRoutes.associateBy { it.qualifiedName }
 
         val resolver = CalleeResolver(functionsBySimpleName, callsBySimpleName, warnings)
+        val entryHostingFunctions = findEntryHostingFunctions(entryRegistrations, resolver)
 
         val edges = LinkedHashSet<NavEdge>()
         entryRegistrations.forEach { registration ->
@@ -143,12 +154,49 @@ class NavEdgeScanner(
                 routesByQualifiedName = routesByQualifiedName,
                 resolver = resolver,
                 maxDepth = callGraphResolutionDepth,
+                entryHostingFunctions = entryHostingFunctions,
                 warnings = warnings,
             )
             edges += traversal.run(lambdaBody, owningFunction)
         }
 
         return NavEdgeScanResult(edges.toList(), warnings.distinct())
+    }
+
+    /**
+     * Every [KtNamedFunction] that is part of nav-graph *construction* rather than a route's own
+     * business logic: a function that either directly hosts an `entry<X> {}` registration (each
+     * [EntryRegistration]'s own owning function, e.g. a `featureXNavEntries` wiring function or an
+     * `AppNavHost`-style aggregator with entries written inline), or that calls — even indirectly,
+     * through any number of hops — a function that does. Computed as the closure of "direct hosts"
+     * under "is called by", via BFS over [CalleeResolver.findCallSites].
+     *
+     * [CallGraphTraversal] must never re-enter one of these via a known-function-call resolution
+     * (see its kdoc's case 3): doing so would pull in *every* sibling `entry<X> {}` registration
+     * wired inside that function — including their own, entirely unrelated navigate calls — as if
+     * they were reachable from whatever single route's search happened to re-discover it. This is
+     * safe to exclude unconditionally because every entry registration already gets its own,
+     * correctly-scoped traversal seeded directly at [scan]'s call site above; there is never a
+     * legitimate reason for a *different* route's search to re-enter this territory.
+     */
+    private fun findEntryHostingFunctions(
+        entryRegistrations: List<EntryRegistration>,
+        resolver: CalleeResolver,
+    ): Set<KtNamedFunction> {
+        val directHosts = entryRegistrations
+            .mapNotNull { PsiTreeUtil.getParentOfType(it.call, KtNamedFunction::class.java) }
+
+        val hosts = LinkedHashSet<KtNamedFunction>()
+        val queue = ArrayDeque(directHosts)
+        while (queue.isNotEmpty()) {
+            val host = queue.removeFirst()
+            if (!hosts.add(host)) continue
+            resolver.findCallSites(host).forEach { callSite ->
+                val caller = PsiTreeUtil.getParentOfType(callSite, KtNamedFunction::class.java)
+                if (caller != null) queue.add(caller)
+            }
+        }
+        return hosts
     }
 
     private fun KtCallExpression.entryLambdaBody(): KtExpression? =
@@ -258,6 +306,7 @@ private class CallGraphTraversal(
     private val routesByQualifiedName: Map<String, NavNode>,
     private val resolver: CalleeResolver,
     private val maxDepth: Int,
+    private val entryHostingFunctions: Set<KtNamedFunction>,
     private val warnings: MutableList<String>,
 ) {
     private val visited = HashSet<KtExpression>()
@@ -309,6 +358,7 @@ private class CallGraphTraversal(
         foundAtDepth: Int,
         queue: ArrayDeque<SearchContext>,
     ) {
+        if (blockedAsEntryHostingFunction(function)) return
         val newDepth = foundAtDepth + 1
         if (newDepth > maxDepth) {
             warnings += "nav edge candidate unresolved beyond depth $maxDepth from route \"$sourceRoute\" " +
@@ -317,6 +367,21 @@ private class CallGraphTraversal(
         }
         val body = function.searchableBody() ?: return
         queue.add(SearchContext(body, newDepth, function.functionTypedParamNames(), function))
+    }
+
+    /**
+     * True (after recording a warning) if [function] is one of [entryHostingFunctions] — nav-graph
+     * *construction*, not a route's own logic — and must not be re-entered from this route's
+     * search. See [entryHostingFunctions]'s own kdoc (on [NavEdgeScanner.findEntryHostingFunctions])
+     * for why this is always safe to refuse rather than guess.
+     */
+    private fun blockedAsEntryHostingFunction(function: KtNamedFunction): Boolean {
+        if (function !in entryHostingFunctions) return false
+        warnings += "nav edge candidate unresolved from route \"$sourceRoute\": " +
+            "${function.name} hosts (directly or transitively) its own entry<...> registration(s) " +
+            "and is only ever scanned as that registration's own search root, never re-entered from " +
+            "another route's search, at ${function.location()}"
+        return true
     }
 
     private fun expandParameterInvocation(
@@ -352,6 +417,7 @@ private class CallGraphTraversal(
             is KtCallableReferenceExpression -> {
                 val refName = expression.callableReference.getReferencedName()
                 val target = resolver.resolveFunction(refName, expression.containingKtFile, expression) ?: return
+                if (blockedAsEntryHostingFunction(target)) return
                 val body = target.searchableBody() ?: return
                 queue.add(SearchContext(body, depth, target.functionTypedParamNames(), target))
             }
