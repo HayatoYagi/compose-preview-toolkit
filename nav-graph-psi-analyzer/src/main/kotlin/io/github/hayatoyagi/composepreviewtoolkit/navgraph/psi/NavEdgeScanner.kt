@@ -51,17 +51,17 @@ data class NavEdgeScanResult(
  * 1. **Navigate call by name**: the reference is a call's callee and its simple name is in
  *    [navigateCallNames] → inspect the call's first argument, read as its own dotted reference
  *    chain (e.g. `["TodoRoute", "Detail"]` for a qualified reference/constructor call
- *    `TodoRoute.Detail`, or just `["Detail"]` for a bare one), and match it against known routes
- *    by leaf simple name. A unique match emits an edge. When more than one known route shares that
- *    leaf name (e.g. `TodoRoute.Detail` and `NoteRoute.Detail`, two sealed-hierarchy siblings),
- *    disambiguation proceeds in the same tiered fashion as [CalleeResolver.resolveFunction] (point
- *    3 below): first the chain's own qualifier - if the call site wrote one - is used to narrow to
- *    the route whose qualified name ends with that same dotted tail, without needing type
- *    resolution; if that leaves more than one candidate, or there was no qualifier to begin with
- *    (the idiomatic-Kotlin `import com.example.TodoRoute.Detail` + bare `navigateTo(Detail)`
- *    pattern), the call site's own file imports are checked for exactly one candidate's qualified
- *    name; if still ambiguous after both, the call is dropped with a warning rather than guessed.
- *    Terminal — not traversed further.
+ *    `TodoRoute.Detail`, or just `["Detail"]` for a bare one). A bare one-segment chain that
+ *    uniquely matches a known route by leaf simple name emits an edge immediately, no further
+ *    resolution needed. Otherwise (a written qualifier, or a bare reference shared by more than one
+ *    known route, e.g. `TodoRoute.Detail` and `NoteRoute.Detail`, two sealed-hierarchy siblings)
+ *    the chain is resolved to a single canonical fully-qualified name before any route lookup
+ *    happens: its root identifier is resolved to its own real qualified name via the call site's
+ *    file imports if one matches, else assumed to resolve within the call site's own file package,
+ *    and the rest of the chain is appended onto that. That exact fully-qualified name is then
+ *    looked up among known routes - a hit is the target, unconditionally; a miss means the call is
+ *    dropped with a warning rather than guessed (see [CallGraphTraversal.resolveQualifiedTarget]'s
+ *    kdoc). Terminal — not traversed further.
  * 2. **Parameter reference**: the reference's simple name matches a function-typed parameter that
  *    is live in the current context — *regardless* of whether the reference is itself a call's
  *    callee (`onClick()`) or merely passed along as a value to some other call
@@ -97,14 +97,15 @@ data class NavEdgeScanResult(
  *
  * Callee-name resolution is deliberately simple-name-based with no type resolution (per the design
  * doc's explicit choice): a same-package match is preferred, then an explicit import match: if
- * still ambiguous, the call is dropped with a warning rather than guessed. The same tiered,
- * type-resolution-free approach applies to matching a `navigateTo(...)` call's first argument
- * against the route registry (a written call-site qualifier tier in place of the same-package
- * tier, since routes are conventionally referenced by qualifier/import rather than bare
- * same-package name - see [CallGraphTraversal.resolveAmbiguousTarget]'s kdoc for why), then an
- * import match, then a warning. `NavKey` is the
- * one type name matched literally throughout — it's `androidx.navigation3.runtime.NavKey`, a fixed
- * library API, not a project-specific naming convention.
+ * still ambiguous, the call is dropped with a warning rather than guessed. Matching a
+ * `navigateTo(...)` call's first argument against the route registry follows the same
+ * type-resolution-free philosophy, but resolves the written reference to one canonical
+ * fully-qualified name via import-then-same-package first (see
+ * [CallGraphTraversal.resolveQualifiedTarget]'s kdoc) rather than filtering candidates by name,
+ * since a suffix-based filter can't reliably tell two differently-nested routes that happen to
+ * share their trailing segments apart. `NavKey` is the one type name matched literally throughout —
+ * it's `androidx.navigation3.runtime.NavKey`, a fixed library API, not a project-specific naming
+ * convention.
  */
 class NavEdgeScanner(
     private val entryFunctionNames: Set<String> = DEFAULT_ENTRY_FUNCTION_NAMES,
@@ -128,11 +129,9 @@ class NavEdgeScanner(
                 .mapNotNull { call -> call.calleeSimpleNameOrNull()?.let { it to call } }
                 .groupBy({ it.first }, { it.second })
 
-        val routesBySimpleName: Map<String, List<NavNode>> =
-            entryRegistrations
-                .map { it.node }
-                .distinctBy { it.qualifiedName }
-                .groupBy { it.simpleName }
+        val distinctRoutes = entryRegistrations.map { it.node }.distinctBy { it.qualifiedName }
+        val routesBySimpleName: Map<String, List<NavNode>> = distinctRoutes.groupBy { it.simpleName }
+        val routesByQualifiedName: Map<String, NavNode> = distinctRoutes.associateBy { it.qualifiedName }
 
         val resolver = CalleeResolver(functionsBySimpleName, callsBySimpleName, warnings)
 
@@ -144,6 +143,7 @@ class NavEdgeScanner(
                 sourceRoute = registration.node.qualifiedName,
                 navigateCallNames = navigateCallNames,
                 routesBySimpleName = routesBySimpleName,
+                routesByQualifiedName = routesByQualifiedName,
                 resolver = resolver,
                 maxDepth = callGraphResolutionDepth,
                 warnings = warnings,
@@ -258,6 +258,7 @@ private class CallGraphTraversal(
     private val sourceRoute: String,
     private val navigateCallNames: Set<String>,
     private val routesBySimpleName: Map<String, List<NavNode>>,
+    private val routesByQualifiedName: Map<String, NavNode>,
     private val resolver: CalleeResolver,
     private val maxDepth: Int,
     private val warnings: MutableList<String>,
@@ -403,12 +404,11 @@ private class CallGraphTraversal(
         edges: MutableList<NavEdge>,
     ) {
         val chain = call.firstArgumentRouteChainOrNull() ?: return
-        val targetSimpleName = chain.last()
-        val candidates = routesBySimpleName[targetSimpleName].orEmpty()
+        val candidates = routesBySimpleName[chain.last()].orEmpty()
         val target = when {
             candidates.isEmpty() -> null
-            candidates.size == 1 -> candidates.single()
-            else -> resolveAmbiguousTarget(chain, targetSimpleName, candidates, call)
+            chain.size == 1 && candidates.size == 1 -> candidates.single()
+            else -> resolveQualifiedTarget(chain, call)
         }
         if (target != null) {
             edges += NavEdge(sourceRoute, target.qualifiedName)
@@ -416,64 +416,51 @@ private class CallGraphTraversal(
     }
 
     /**
-     * [candidates] all share [targetSimpleName] as their leaf simple name, so a bare-name match
-     * can't tell them apart. Mirrors [CalleeResolver.resolveFunction]'s own fallback order for the
-     * structurally identical "ambiguous name" problem:
+     * Resolves [chain] (e.g. `["TodoRoute", "Detail"]`, or a single-segment chain that
+     * [handleNavigateCall] couldn't already resolve unambiguously by bare simple name) to one
+     * canonical fully-qualified route name, then looks that up directly in
+     * [routesByQualifiedName] - an exact match, never a suffix filter over same-leaf-name
+     * candidates the way a written qualifier like `TodoRoute.Detail` could otherwise coincidentally
+     * (and wrongly) match an unrelated, differently-nested route also ending in `.TodoRoute.Detail`.
      *
-     * 1. If the call site wrote a qualifier (`chain` has more than one segment, e.g.
-     *    `["TodoRoute", "Detail"]`), narrow to candidates whose [NavNode.qualifiedName] ends with
-     *    that same dotted tail - enough to disambiguate sealed-hierarchy siblings sharing a leaf
-     *    name (e.g. `TodoRoute.Detail` vs. `NoteRoute.Detail`) without needing type resolution.
-     * 2. Otherwise (no qualifier was written, the qualifier didn't narrow to exactly one candidate,
-     *    or the written qualifier matched none of the candidates at all), fall back to the call's
-     *    containing file's own import directives: if exactly one candidate's [NavNode.qualifiedName]
-     *    is imported, that's the target. This is the idiomatic-Kotlin case of
-     *    `import com.example.TodoRoute.Detail` followed by a bare `navigateTo(Detail)`, which is
-     *    exactly as common in real code as writing the qualifier at the call site and deserves the
-     *    same treatment.
-     * 3. Still ambiguous after both → drop with a warning rather than guess.
+     * The chain's root identifier (its first segment, or its only segment for a single-segment
+     * chain) is resolved to its own real qualified name first: an import in [call]'s containing
+     * file whose fully-qualified name's last segment equals the root identifier wins if one exists;
+     * otherwise the root is assumed to resolve within the call site's own file package, since
+     * Kotlin doesn't require an import for a same-package reference. The rest of the written chain,
+     * if any, is appended onto that resolved name and looked up exactly.
      *
-     * Deliberately *not* mirroring [CalleeResolver.resolveFunction]'s same-package tier: that tier
-     * earns its place there because two identically-named top-level functions living in unrelated
-     * packages are a realistic, common shape. Sibling routes that share a leaf simple name are, by
-     * construction, sealed-hierarchy siblings deliberately declared next to each other (see the
-     * class kdoc's example) - so they're almost always in the *same* package as each other, meaning
-     * a same-package check would rarely narrow anything down, and routes are conventionally
-     * referenced via explicit import or qualifier rather than bare same-package reference anyway.
+     * A miss - the resulting fully-qualified name doesn't match any route [NavNodeScanner] actually
+     * found - is not guessed at: it's dropped with a warning, the same "don't guess" philosophy as
+     * everywhere else in this class. This is also what happens when the root identifier resolves
+     * through neither an import nor the same-package assumption (e.g. a call site referencing a
+     * route via a class member or companion object) - the built name simply won't match anything.
      */
-    private fun resolveAmbiguousTarget(
+    private fun resolveQualifiedTarget(
         chain: List<String>,
-        targetSimpleName: String,
-        candidates: List<NavNode>,
         call: KtCallExpression,
     ): NavNode? {
-        if (chain.size > 1) {
-            val qualifiedTail = chain.joinToString(".")
-            val matches = candidates.filter { it.qualifiedName.endsWith(".$qualifiedTail") || it.qualifiedName == qualifiedTail }
-            if (matches.size == 1) return matches.single()
-            if (matches.isNotEmpty()) {
-                resolveByImport(matches, call)?.let { return it }
-                warnings += "ambiguous navigate target route \"$qualifiedTail\" " +
-                    "(${matches.size} candidates) at ${call.location()}"
-                return null
-            }
-            // matches.isEmpty(): the written qualifier matched none of the candidates; fall through
-            // to the same bare-name (import-then-warn) handling below as if there had been none.
+        val rootFqn = resolveRootFqn(chain.first(), call.containingKtFile)
+        val candidateFqn = if (chain.size > 1) "$rootFqn.${chain.drop(1).joinToString(".")}" else rootFqn
+        val target = routesByQualifiedName[candidateFqn]
+        if (target == null) {
+            warnings += "ambiguous navigate target route \"${chain.joinToString(".")}\" at ${call.location()}"
         }
-
-        resolveByImport(candidates, call)?.let { return it }
-        warnings += "ambiguous navigate target route \"$targetSimpleName\" " +
-            "(${candidates.size} candidates) at ${call.location()}"
-        return null
+        return target
     }
 
-    /** The single [candidates] entry whose [NavNode.qualifiedName] is imported by [call]'s file, if exactly one is. */
-    private fun resolveByImport(
-        candidates: List<NavNode>,
-        call: KtCallExpression,
-    ): NavNode? {
-        val importedFqNames = call.containingKtFile.importDirectives.mapNotNull { it.importedFqName?.asString() }.toSet()
-        return candidates.filter { it.qualifiedName in importedFqNames }.singleOrNull()
+    /** [rootName]'s own fully-qualified name: an import of it in [file] if there is one, else [file]'s own package. */
+    private fun resolveRootFqn(
+        rootName: String,
+        file: KtFile,
+    ): String {
+        val imported = file.importDirectives
+            .mapNotNull { it.importedFqName }
+            .firstOrNull { it.shortName().asString() == rootName }
+        if (imported != null) return imported.asString()
+
+        val packageName = file.packageFqName.asString()
+        return if (packageName.isEmpty()) rootName else "$packageName.$rootName"
     }
 }
 
@@ -507,9 +494,10 @@ private fun KtCallExpression.firstArgumentRouteChainOrNull(): List<String>? =
  * The route argument's own dotted reference chain, outermost-to-innermost (e.g.
  * `["TodoRoute", "Detail"]` for a qualified reference/constructor call `TodoRoute.Detail`, or just
  * `["Detail"]` for a bare one) - unlike a bare simple name, this preserves whatever qualifier the
- * call site actually wrote, so a candidate route can be matched against it (see
- * [CallGraphTraversal.resolveAmbiguousTarget]). Returns `null` when the argument isn't a
- * recognized route-shaped expression at all (an unresolvable navigate call, same as before).
+ * call site actually wrote, so it can be resolved to a canonical fully-qualified name and looked
+ * up exactly (see [CallGraphTraversal.resolveQualifiedTarget]). Returns `null` when the argument
+ * isn't a recognized route-shaped expression at all (an unresolvable navigate call, same as
+ * before).
  */
 private fun KtExpression.routeReferenceChainOrNull(): List<String>? = when (this) {
     is KtCallExpression -> (calleeExpression as? KtNameReferenceExpression)?.getReferencedName()?.let { listOf(it) }

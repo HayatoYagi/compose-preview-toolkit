@@ -598,6 +598,50 @@ class NavEdgeScannerTest {
     }
 
     @Test
+    fun `a written qualifier's coincidental tail match with an unrelated deeper-nested route is not guessed`() {
+        // Foo.TodoRoute.Detail is an unrelated, differently-nested route that happens to share its
+        // last two segments with the call site's own written qualifier TodoRoute.Detail. A
+        // suffix-based tail match would incorrectly treat this as the (uniquely matching) target;
+        // the qualifier must instead resolve to a real canonical fully-qualified name (via import
+        // or same-package assumption) before any lookup happens, and neither applies here (there is
+        // no top-level TodoRoute in this package, nor any import for one), so this must be dropped
+        // with a warning rather than guessed.
+        val file = parser.parse(
+            "QualifierFalsePositive.kt",
+            """
+            package com.example.qualifierfalsepositive
+
+            import androidx.navigation3.runtime.NavKey
+            import androidx.navigation3.runtime.entry
+
+            object ListRoute : NavKey
+
+            sealed interface Foo : NavKey {
+                sealed interface TodoRoute : NavKey {
+                    object Detail : TodoRoute
+                }
+            }
+
+            fun register() {
+                entry<ListRoute> { navigateTo(TodoRoute.Detail) }
+                entry<Foo.TodoRoute.Detail> { NestedDetailScreen() }
+            }
+
+            fun NestedDetailScreen() = Unit
+            fun navigateTo(route: NavKey) = Unit
+            """.trimIndent(),
+        )
+
+        val result = NavEdgeScanner().scan(listOf(file))
+
+        assertTrue(result.edges.isEmpty(), "expected no edges but found: ${result.edges}")
+        assertTrue(
+            result.warnings.any { it.contains("ambiguous", ignoreCase = true) && it.contains("TodoRoute.Detail") },
+            "expected a give-up warning but got: ${result.warnings}",
+        )
+    }
+
+    @Test
     fun `a callback relying purely on type inference, with no explicit annotation, is not found - known limitation`() {
         // Matches the documented gap: a local val lambda with an untyped parameter is invisible to
         // this purely-syntactic scanner regardless of naming, since it isn't even tracked as a live
