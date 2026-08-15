@@ -21,7 +21,7 @@ lifecycle-viewmodel-navigation3 = "2.11.0"
 # permanently ahead of whatever's actually published) — resolves via mavenLocal() after running
 # the publish step described in the root README. Single source of truth for both plugin ids
 # below, bumped alongside the root gradle.properties `version=` by bump-version.yml.
-composePreviewToolkit = "0.4.0"
+composePreviewToolkit = "1.0.0"
 
 [libraries]
 compose-runtime = { module = "androidx.compose.runtime:runtime", version.ref = "compose" }
