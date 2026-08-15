@@ -51,17 +51,14 @@ data class NavEdgeScanResult(
  * 1. **Navigate call by name**: the reference is a call's callee and its simple name is in
  *    [navigateCallNames] → inspect the call's first argument, read as its own dotted reference
  *    chain (e.g. `["TodoRoute", "Detail"]` for a qualified reference/constructor call
- *    `TodoRoute.Detail`, or just `["Detail"]` for a bare one). A bare one-segment chain that
- *    uniquely matches a known route by leaf simple name emits an edge immediately, no further
- *    resolution needed. Otherwise (a written qualifier, or a bare reference shared by more than one
- *    known route, e.g. `TodoRoute.Detail` and `NoteRoute.Detail`, two sealed-hierarchy siblings)
- *    the chain is resolved to a single canonical fully-qualified name before any route lookup
- *    happens: its root identifier is resolved to its own real qualified name via the call site's
- *    file imports if one matches, else assumed to resolve within the call site's own file package,
- *    and the rest of the chain is appended onto that. That exact fully-qualified name is then
- *    looked up among known routes - a hit is the target, unconditionally; a miss means the call is
- *    dropped with a warning rather than guessed (see [CallGraphTraversal.resolveQualifiedTarget]'s
- *    kdoc). Terminal — not traversed further.
+ *    `TodoRoute.Detail`, or just `["Detail"]` for a bare one). Every chain, qualified or bare,
+ *    unambiguous or not, is resolved the same way to a single canonical fully-qualified name before
+ *    any route lookup happens: its root identifier is resolved to its own real qualified name via
+ *    the call site's file imports if one matches, else assumed to resolve within the call site's own
+ *    file package, and the rest of the chain is appended onto that. That exact fully-qualified name
+ *    is then looked up among known routes - a hit is the target, unconditionally; a miss means the
+ *    call is dropped with a warning rather than guessed (see
+ *    [CallGraphTraversal.resolveQualifiedTarget]'s kdoc). Terminal — not traversed further.
  * 2. **Parameter reference**: the reference's simple name matches a function-typed parameter that
  *    is live in the current context — *regardless* of whether the reference is itself a call's
  *    callee (`onClick()`) or merely passed along as a value to some other call
@@ -130,7 +127,7 @@ class NavEdgeScanner(
                 .groupBy({ it.first }, { it.second })
 
         val distinctRoutes = entryRegistrations.map { it.node }.distinctBy { it.qualifiedName }
-        val routesBySimpleName: Map<String, List<NavNode>> = distinctRoutes.groupBy { it.simpleName }
+        val routeSimpleNames: Set<String> = distinctRoutes.mapTo(mutableSetOf()) { it.simpleName }
         val routesByQualifiedName: Map<String, NavNode> = distinctRoutes.associateBy { it.qualifiedName }
 
         val resolver = CalleeResolver(functionsBySimpleName, callsBySimpleName, warnings)
@@ -142,7 +139,7 @@ class NavEdgeScanner(
             val traversal = CallGraphTraversal(
                 sourceRoute = registration.node.qualifiedName,
                 navigateCallNames = navigateCallNames,
-                routesBySimpleName = routesBySimpleName,
+                routeSimpleNames = routeSimpleNames,
                 routesByQualifiedName = routesByQualifiedName,
                 resolver = resolver,
                 maxDepth = callGraphResolutionDepth,
@@ -257,7 +254,7 @@ private data class SearchContext(
 private class CallGraphTraversal(
     private val sourceRoute: String,
     private val navigateCallNames: Set<String>,
-    private val routesBySimpleName: Map<String, List<NavNode>>,
+    private val routeSimpleNames: Set<String>,
     private val routesByQualifiedName: Map<String, NavNode>,
     private val resolver: CalleeResolver,
     private val maxDepth: Int,
@@ -395,7 +392,7 @@ private class CallGraphTraversal(
         val parameter = owningFunction.valueParameters.firstOrNull { it.name == paramName } ?: return
         val functionType = parameter.declaredFunctionTypeOrNull() ?: return
         val paramTypeNames = functionType.parameters.mapNotNull { it.typeReference?.declaredSimpleTypeNameOrNull() }
-        val isRouteShaped = paramTypeNames.any { it == "NavKey" || it in routesBySimpleName }
+        val isRouteShaped = paramTypeNames.any { it == "NavKey" || it in routeSimpleNames }
         if (isRouteShaped) handleNavigateCall(call, edges)
     }
 
@@ -404,24 +401,19 @@ private class CallGraphTraversal(
         edges: MutableList<NavEdge>,
     ) {
         val chain = call.firstArgumentRouteChainOrNull() ?: return
-        val candidates = routesBySimpleName[chain.last()].orEmpty()
-        val target = when {
-            candidates.isEmpty() -> null
-            chain.size == 1 && candidates.size == 1 -> candidates.single()
-            else -> resolveQualifiedTarget(chain, call)
-        }
+        val target = resolveQualifiedTarget(chain, call)
         if (target != null) {
             edges += NavEdge(sourceRoute, target.qualifiedName)
         }
     }
 
     /**
-     * Resolves [chain] (e.g. `["TodoRoute", "Detail"]`, or a single-segment chain that
-     * [handleNavigateCall] couldn't already resolve unambiguously by bare simple name) to one
-     * canonical fully-qualified route name, then looks that up directly in
-     * [routesByQualifiedName] - an exact match, never a suffix filter over same-leaf-name
-     * candidates the way a written qualifier like `TodoRoute.Detail` could otherwise coincidentally
-     * (and wrongly) match an unrelated, differently-nested route also ending in `.TodoRoute.Detail`.
+     * Resolves [chain] (e.g. `["TodoRoute", "Detail"]` for a written qualifier, or just `["Detail"]`
+     * for a bare reference - every shape goes through this, unambiguous or not) to one canonical
+     * fully-qualified route name, then looks that up directly in [routesByQualifiedName] - an exact
+     * match, never a suffix filter over same-leaf-name candidates the way a written qualifier like
+     * `TodoRoute.Detail` could otherwise coincidentally (and wrongly) match an unrelated,
+     * differently-nested route also ending in `.TodoRoute.Detail`.
      *
      * The chain's root identifier (its first segment, or its only segment for a single-segment
      * chain) is resolved to its own real qualified name first: an import in [call]'s containing
@@ -429,6 +421,13 @@ private class CallGraphTraversal(
      * otherwise the root is assumed to resolve within the call site's own file package, since
      * Kotlin doesn't require an import for a same-package reference. The rest of the written chain,
      * if any, is appended onto that resolved name and looked up exactly.
+     *
+     * This covers every legally-referenceable route with no separate fast path needed: a bare
+     * simple-name reference is only valid Kotlin at all when the referenced declaration is either
+     * explicitly imported or in the same package as the reference - there's no third way - and both
+     * of those are exactly what root resolution above already checks. A single-candidate bare
+     * reference doesn't need special-casing; it resolves through the same import-else-same-package
+     * logic as everything else and lands on the same route.
      *
      * A miss - the resulting fully-qualified name doesn't match any route [NavNodeScanner] actually
      * found - is not guessed at: it's dropped with a warning, the same "don't guess" philosophy as
