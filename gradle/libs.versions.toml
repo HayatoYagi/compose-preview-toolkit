@@ -1,16 +1,16 @@
 [versions]
 agp = "9.2.1"
-kotlin = "2.4.0"
+kotlin = "2.4.10"
 ksp = "2.3.9"
-compose = "1.11.4"
-screenshot = "0.0.1-alpha15"
+compose = "1.12.0"
+screenshot = "0.0.1-alpha16"
 android-compileSdk = "37"
 android-minSdk = "24"
 android-targetSdk = "37"
 androidx-activity = "1.13.0"
-material3 = "1.5.0-alpha23"
+material3 = "1.5.0-alpha26"
 mavenPublish = "0.37.0"
-gradlePluginPublish = "1.3.1"
+gradlePluginPublish = "2.1.1"
 junit = "6.1.3"
 
 [libraries]
