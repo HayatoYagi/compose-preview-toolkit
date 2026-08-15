@@ -22,36 +22,74 @@ class NavEdgeScannerTest {
     }
 
     @Test
-    fun `pattern (i) callback-threaded and inline edges are both found, mirroring the real sample's exact shape`() {
-        // Mirrors sample/app/AppNavHost.kt + sample/feature-a exactly: HomeRoute's navigateTo is
-        // written inline in the entry block; FeatureARoute's is threaded up through
-        // featureANavEntries's onProceedClick parameter, forwarded once more through
-        // FeatureAScreen's own onProceedClick parameter, and only actually called from
-        // AppNavHost's own call site of featureANavEntries.
+    fun `direct construction and use - a NavBackStack local val is mutated one hop from the entry block, no closure indirection`() {
+        val file = parser.parse(
+            "Direct.kt",
+            """
+            package com.example.direct
+
+            import androidx.navigation3.runtime.NavBackStack
+            import androidx.navigation3.runtime.NavKey
+            import androidx.navigation3.runtime.entry
+
+            object DirectSourceRoute : NavKey
+            object DirectTargetRoute : NavKey
+
+            fun registerDirect() {
+                val backStack = NavBackStack<NavKey>()
+                entry<DirectSourceRoute> { backStack.add(DirectTargetRoute) }
+                entry<DirectTargetRoute> { DirectTargetScreen() }
+            }
+
+            fun DirectTargetScreen() = Unit
+            """.trimIndent(),
+        )
+
+        val result = NavEdgeScanner().scan(listOf(file))
+
+        assertEquals(
+            listOf(NavEdge("com.example.direct.DirectSourceRoute", "com.example.direct.DirectTargetRoute")),
+            result.edges,
+        )
+    }
+
+    @Test
+    fun `mirrors the real sample's exact wiring shape - an inline local-val closure call, a zero-arg threaded callback, and a closure threaded as a parameter all resolve`() {
+        // Mirrors sample/app/AppNavHost.kt + sample/feature-a + sample/feature-b exactly:
+        // - HomeRoute -> FeatureARoute: navigateTo is a local val (not a parameter), called
+        //   directly inside HomeRoute's own entry block.
+        // - FeatureARoute -> FeatureBRoute: featureANavEntries's onProceedClick is an ordinary
+        //   zero-arg callback, threaded up to AppNavHost and only invoked there.
+        // - FeatureBRoute -> FeatureARoute: featureBNavEntries is handed the navigateTo closure
+        //   itself (not a single-purpose callback) and invokes it directly in its own entry block.
         val appNavHost = parser.parse(
             "AppNavHost.kt",
             """
             package com.example.app
 
+            import androidx.navigation3.runtime.NavBackStack
             import androidx.navigation3.runtime.NavKey
             import androidx.navigation3.runtime.entry
             import androidx.navigation3.runtime.entryProvider
             import com.example.featurea.FeatureARoute
             import com.example.featurea.featureANavEntries
             import com.example.featureb.FeatureBRoute
+            import com.example.featureb.featureBNavEntries
 
             object HomeRoute : NavKey
 
             fun appNavHost() {
+                val backStack = NavBackStack<NavKey>(HomeRoute)
+                val navigateTo: (NavKey) -> Unit = { key -> backStack.add(key) }
                 entryProvider<NavKey> {
                     entry<HomeRoute> {
                         HomeScreen(onGoToFeatureAClick = { navigateTo(FeatureARoute) })
                     }
                     featureANavEntries(onProceedClick = { navigateTo(FeatureBRoute) })
+                    featureBNavEntries(navigateTo = navigateTo)
                 }
             }
 
-            fun navigateTo(route: NavKey) = Unit
             fun HomeScreen(onGoToFeatureAClick: () -> Unit) = Unit
             """.trimIndent(),
         )
@@ -83,14 +121,17 @@ class NavEdgeScannerTest {
 
             import androidx.navigation3.runtime.EntryProviderScope
             import androidx.navigation3.runtime.NavKey
+            import com.example.featurea.FeatureARoute
 
             object FeatureBRoute : NavKey
 
-            fun EntryProviderScope<NavKey>.featureBNavEntries() {
-                entry<FeatureBRoute> { FeatureBScreen() }
+            fun EntryProviderScope<NavKey>.featureBNavEntries(navigateTo: (NavKey) -> Unit) {
+                entry<FeatureBRoute> {
+                    FeatureBScreen(onRestartClick = { navigateTo(FeatureARoute) })
+                }
             }
 
-            fun FeatureBScreen() = Unit
+            fun FeatureBScreen(onRestartClick: () -> Unit) = Unit
             """.trimIndent(),
         )
 
@@ -100,74 +141,201 @@ class NavEdgeScannerTest {
             setOf(
                 NavEdge("com.example.app.HomeRoute", "com.example.featurea.FeatureARoute"),
                 NavEdge("com.example.featurea.FeatureARoute", "com.example.featureb.FeatureBRoute"),
+                NavEdge("com.example.featureb.FeatureBRoute", "com.example.featurea.FeatureARoute"),
             ),
             result.edges.toSet(),
         )
     }
 
     @Test
-    fun `pattern (ii) direct navigateTo call, one level deep, with no callback parameter at all`() {
-        val file = parser.parse(
-            "FeatureC.kt",
+    fun `the NavBackStack instance itself is threaded as a typed parameter into a wiring function, not wrapped in a closure`() {
+        val app = parser.parse(
+            "AppNavHost2.kt",
             """
-            package com.example.featurec
+            package com.example.app2
 
+            import androidx.navigation3.runtime.NavBackStack
             import androidx.navigation3.runtime.NavKey
             import androidx.navigation3.runtime.entry
+            import com.example.feature2.FeatureRoute
+            import com.example.feature2.feature2NavEntries
 
-            object FeatureCRoute : NavKey
-            object FeatureDRoute : NavKey
+            object HomeRoute2 : NavKey
 
-            fun registerFeatureC() {
-                entry<FeatureCRoute> { restartFlow() }
-                entry<FeatureDRoute> { FeatureDScreen() }
+            fun appNavHost2() {
+                val backStack = NavBackStack<NavKey>(HomeRoute2)
+                entry<HomeRoute2> { backStack.add(FeatureRoute) }
+                feature2NavEntries(backStack)
             }
+            """.trimIndent(),
+        )
+        val feature2 = parser.parse(
+            "Feature2NavEntries.kt",
+            """
+            package com.example.feature2
 
-            fun restartFlow() {
-                navigateTo(FeatureDRoute)
+            import androidx.navigation3.runtime.EntryProviderScope
+            import androidx.navigation3.runtime.NavBackStack
+            import androidx.navigation3.runtime.NavKey
+            import androidx.navigation3.runtime.entry
+            import com.example.app2.HomeRoute2
+
+            object FeatureRoute : NavKey
+
+            fun EntryProviderScope<NavKey>.feature2NavEntries(backStack: NavBackStack<NavKey>) {
+                entry<FeatureRoute> { backStack.add(HomeRoute2) }
             }
-
-            fun FeatureDScreen() = Unit
-            fun navigateTo(route: NavKey) = Unit
             """.trimIndent(),
         )
 
-        val result = NavEdgeScanner().scan(listOf(file))
+        val result = NavEdgeScanner().scan(listOf(app, feature2))
 
         assertEquals(
-            listOf(NavEdge("com.example.featurec.FeatureCRoute", "com.example.featurec.FeatureDRoute")),
-            result.edges,
+            setOf(
+                NavEdge("com.example.app2.HomeRoute2", "com.example.feature2.FeatureRoute"),
+                NavEdge("com.example.feature2.FeatureRoute", "com.example.app2.HomeRoute2"),
+            ),
+            result.edges.toSet(),
         )
     }
 
     @Test
-    fun `pattern (ii) navigateTo called directly inside the entry block itself`() {
+    fun `add(index, element) prefers the named element argument, and addAll unwraps a call-shaped collection literal`() {
         val file = parser.parse(
-            "FeatureE.kt",
+            "Multi.kt",
             """
-            package com.example.featuree
+            package com.example.multi
 
+            import androidx.navigation3.runtime.NavBackStack
             import androidx.navigation3.runtime.NavKey
             import androidx.navigation3.runtime.entry
 
-            object FeatureERoute : NavKey
-            object FeatureFRoute : NavKey
+            object MultiSourceRoute : NavKey
+            object MultiIndexedTargetRoute : NavKey
+            object MultiFirstTargetRoute : NavKey
+            object MultiSecondTargetRoute : NavKey
 
-            fun registerFeatureE() {
-                entry<FeatureERoute> { navigate(FeatureFRoute) }
-                entry<FeatureFRoute> { FeatureFScreen() }
+            fun registerMulti() {
+                val backStack = NavBackStack<NavKey>()
+                entry<MultiSourceRoute> {
+                    backStack.add(0, element = MultiIndexedTargetRoute)
+                    backStack.addAll(listOf(MultiFirstTargetRoute, MultiSecondTargetRoute))
+                }
+                entry<MultiIndexedTargetRoute> { MultiIndexedTargetScreen() }
+                entry<MultiFirstTargetRoute> { MultiFirstTargetScreen() }
+                entry<MultiSecondTargetRoute> { MultiSecondTargetScreen() }
             }
 
-            fun FeatureFScreen() = Unit
-            fun navigate(route: NavKey) = Unit
+            fun MultiIndexedTargetScreen() = Unit
+            fun MultiFirstTargetScreen() = Unit
+            fun MultiSecondTargetScreen() = Unit
             """.trimIndent(),
         )
 
         val result = NavEdgeScanner().scan(listOf(file))
 
         assertEquals(
-            listOf(NavEdge("com.example.featuree.FeatureERoute", "com.example.featuree.FeatureFRoute")),
-            result.edges,
+            setOf(
+                NavEdge("com.example.multi.MultiSourceRoute", "com.example.multi.MultiIndexedTargetRoute"),
+                NavEdge("com.example.multi.MultiSourceRoute", "com.example.multi.MultiFirstTargetRoute"),
+                NavEdge("com.example.multi.MultiSourceRoute", "com.example.multi.MultiSecondTargetRoute"),
+            ),
+            result.edges.toSet(),
+        )
+    }
+
+    @Test
+    fun `addAll with a collection argument that isn't a recognizable call-shaped literal is dropped with a warning, not guessed`() {
+        val file = parser.parse(
+            "UnrecognizableAddAll.kt",
+            """
+            package com.example.unrecognizableaddall
+
+            import androidx.navigation3.runtime.NavBackStack
+            import androidx.navigation3.runtime.NavKey
+            import androidx.navigation3.runtime.entry
+
+            object SourceRoute : NavKey
+
+            fun register(routes: List<NavKey>) {
+                val backStack = NavBackStack<NavKey>()
+                entry<SourceRoute> { backStack.addAll(routes) }
+            }
+            """.trimIndent(),
+        )
+
+        val result = NavEdgeScanner().scan(listOf(file))
+
+        assertTrue(result.edges.isEmpty(), "expected no edges but found: ${result.edges}")
+        assertTrue(
+            result.warnings.any { it.contains("addAll", ignoreCase = false) },
+            "expected an addAll give-up warning but got: ${result.warnings}",
+        )
+    }
+
+    @Test
+    fun `a (NavKey) to Unit typed parameter invoked directly, with no NavBackStack anywhere in scope, is no longer detected - retired-mode confirmation`() {
+        // Matches the shape the now-retired declared-callback-type detection used to catch: a
+        // non-standard-named callback with an explicit NavKey parameter type, invoked directly.
+        // With navigateCallNames and declared-callback-type detection both retired in favor of
+        // NavBackStack-mutation tracking, and no NavBackStack construction anywhere in this
+        // fixture, this must now find nothing.
+        val file = parser.parse(
+            "RetiredTypedDirect.kt",
+            """
+            package com.example.retiredtypeddirect
+
+            import androidx.navigation3.runtime.NavKey
+            import androidx.navigation3.runtime.entry
+
+            object RetiredSourceRoute : NavKey
+            object RetiredTargetRoute : NavKey
+
+            fun registerRetiredTypedDirect(goTo: (NavKey) -> Unit) {
+                entry<RetiredSourceRoute> { goTo(RetiredTargetRoute) }
+                entry<RetiredTargetRoute> { RetiredTargetScreen() }
+            }
+
+            fun RetiredTargetScreen() = Unit
+            """.trimIndent(),
+        )
+
+        val result = NavEdgeScanner().scan(listOf(file))
+
+        assertTrue(result.edges.isEmpty(), "expected no edges but found: ${result.edges}")
+    }
+
+    @Test
+    fun `multiple separate NavBackStack construction sites are refused rather than guessed`() {
+        val file = parser.parse(
+            "MultiBackStack.kt",
+            """
+            package com.example.multibackstack
+
+            import androidx.navigation3.runtime.NavBackStack
+            import androidx.navigation3.runtime.NavKey
+            import androidx.navigation3.runtime.entry
+
+            object MultiInstanceSourceRoute : NavKey
+            object MultiInstanceTargetRoute : NavKey
+
+            fun registerMultiInstance() {
+                val backStackA = NavBackStack<NavKey>()
+                val backStackB = NavBackStack<NavKey>()
+                entry<MultiInstanceSourceRoute> { backStackA.add(MultiInstanceTargetRoute) }
+                entry<MultiInstanceTargetRoute> { MultiInstanceTargetScreen() }
+            }
+
+            fun MultiInstanceTargetScreen() = Unit
+            """.trimIndent(),
+        )
+
+        val result = NavEdgeScanner().scan(listOf(file))
+
+        assertTrue(result.edges.isEmpty(), "expected no edges but found: ${result.edges}")
+        assertTrue(
+            result.warnings.any { it.contains("NavBackStack") && it.contains("single") },
+            "expected a multi-instance warning but got: ${result.warnings}",
         )
     }
 
@@ -220,15 +388,7 @@ class NavEdgeScannerTest {
             """
             package com.example.a
 
-            import androidx.navigation3.runtime.NavKey
-
-            object RouteFoo : NavKey
-
-            fun helper() {
-                navigateTo(RouteFoo)
-            }
-
-            fun navigateTo(route: NavKey) = Unit
+            fun helper() = Unit
             """.trimIndent(),
         )
         val helperB = parser.parse(
@@ -236,15 +396,7 @@ class NavEdgeScannerTest {
             """
             package com.example.b
 
-            import androidx.navigation3.runtime.NavKey
-
-            object RouteBar : NavKey
-
-            fun helper() {
-                navigateTo(RouteBar)
-            }
-
-            fun navigateTo(route: NavKey) = Unit
+            fun helper() = Unit
             """.trimIndent(),
         )
 
@@ -262,6 +414,7 @@ class NavEdgeScannerTest {
         fun source(): String = """
             package com.example.depth
 
+            import androidx.navigation3.runtime.NavBackStack
             import androidx.navigation3.runtime.NavKey
             import androidx.navigation3.runtime.entry
 
@@ -269,17 +422,17 @@ class NavEdgeScannerTest {
             object TargetRoute : NavKey
 
             fun registerDeep() {
-                entry<DeepRoute> { level1() }
+                val backStack = NavBackStack<NavKey>()
+                entry<DeepRoute> { level1(backStack) }
                 entry<TargetRoute> { TargetScreen() }
             }
 
-            fun level1() { level2() }
-            fun level2() { level3() }
-            fun level3() { level4() }
-            fun level4() { navigateTo(TargetRoute) }
+            fun level1(backStack: NavBackStack<NavKey>) { level2(backStack) }
+            fun level2(backStack: NavBackStack<NavKey>) { level3(backStack) }
+            fun level3(backStack: NavBackStack<NavKey>) { level4(backStack) }
+            fun level4(backStack: NavBackStack<NavKey>) { backStack.add(TargetRoute) }
 
             fun TargetScreen() = Unit
-            fun navigateTo(route: NavKey) = Unit
         """.trimIndent()
 
         val tooShallow = parser.parse("DeepTooShallow.kt", source())
@@ -295,6 +448,121 @@ class NavEdgeScannerTest {
         assertEquals(
             listOf(NavEdge("com.example.depth.DeepRoute", "com.example.depth.TargetRoute")),
             successResult.edges,
+        )
+    }
+
+    @Test
+    fun `a callback threaded through several nested UI-component layers and resolved back through a chained navigate-closure wrapper needs the recalibrated depth bound - real-world regression repro`() {
+        // Reproduces a real regression found via A/B testing this PR's branch against the
+        // pre-PR build on the same production app: one previously-correct edge went missing,
+        // traced (via this scanner's own "beyond depth" warning) to a route-carrying callback
+        // parameter threaded through several nested UI-component layers before finally being
+        // invoked with a concrete route-constructor argument, whose binding itself resolves
+        // through a second, app-root-level pass-through closure before reaching the real
+        // NavBackStack mutation.
+        //
+        // Under the retired declared-callback-type detection, `onEntryTap(DetailRoute(1))`
+        // terminated the search immediately - onEntryTap's own declared type was already
+        // route-shaped, so no further tracing was needed. Under NavBackStack-mutation tracking,
+        // the same call is only the *start* of tracing: the search must walk back up through
+        // every intermediate composable's own pass-through of onEntryTap to find where it was
+        // really bound (AggregatorScreen -> EntryList -> EntryListItem, one hop per layer to
+        // discover the invocation, one more hop each to retrace it), then through the
+        // `{ destination -> navigateTo(destination) }` wrapper into the local `navigateTo`
+        // closure, and finally into `backStack.add(...)`. That's more hops than the old
+        // algorithm ever needed for the equivalent edge, and (at the fixture's 3 UI-component
+        // layers, matching "several" from the real regression) exceeds the pre-fix default of 4.
+        fun aggregatorSource() = """
+            package com.example.regressiondepth.aggregator
+
+            import androidx.navigation3.runtime.EntryProviderScope
+            import androidx.navigation3.runtime.NavKey
+            import androidx.navigation3.runtime.entry
+            import com.example.regressiondepth.detail.DetailRoute
+
+            object AggregatorRoute : NavKey
+
+            fun EntryProviderScope<NavKey>.aggregatorNavEntries(onEntryTap: (DetailRoute) -> Unit) {
+                entry<AggregatorRoute> { AggregatorScreen(onEntryTap = onEntryTap) }
+            }
+
+            fun AggregatorScreen(onEntryTap: (DetailRoute) -> Unit) {
+                EntryList(onEntryTap = onEntryTap)
+            }
+
+            fun EntryList(onEntryTap: (DetailRoute) -> Unit) {
+                EntryListItem(onEntryTap = onEntryTap)
+            }
+
+            fun EntryListItem(onEntryTap: (DetailRoute) -> Unit) {
+                Button(onClick = { onEntryTap(DetailRoute(1)) })
+            }
+
+            fun Button(onClick: () -> Unit) = Unit
+        """.trimIndent()
+
+        fun appRootSource() = """
+            package com.example.regressiondepth.app
+
+            import androidx.navigation3.runtime.NavBackStack
+            import androidx.navigation3.runtime.NavKey
+            import androidx.navigation3.runtime.entryProvider
+            import com.example.regressiondepth.aggregator.aggregatorNavEntries
+
+            fun appRoot() {
+                val backStack = NavBackStack<NavKey>()
+                val navigateTo: (NavKey) -> Unit = { key -> backStack.add(key) }
+                entryProvider<NavKey> {
+                    aggregatorNavEntries(onEntryTap = { destination -> navigateTo(destination) })
+                }
+            }
+        """.trimIndent()
+
+        fun detailSource() = """
+            package com.example.regressiondepth.detail
+
+            import androidx.navigation3.runtime.NavKey
+            import androidx.navigation3.runtime.entry
+
+            data class DetailRoute(val id: Int) : NavKey
+
+            fun registerDetail() {
+                entry<DetailRoute> { DetailScreen() }
+            }
+
+            fun DetailScreen() = Unit
+        """.trimIndent()
+
+        val shallowFiles = listOf(
+            parser.parse("AppRootShallow.kt", appRootSource()),
+            parser.parse("AggregatorShallow.kt", aggregatorSource()),
+            parser.parse("DetailShallow.kt", detailSource()),
+        )
+        // 4 was this project's own pre-fix default - comfortably enough depth for the retired
+        // declared-callback-type algorithm's equivalent hop count, but not for this one.
+        val shallowResult = NavEdgeScanner(callGraphResolutionDepth = 4).scan(shallowFiles)
+        assertTrue(shallowResult.edges.isEmpty(), "expected no edges but found: ${shallowResult.edges}")
+        assertTrue(
+            shallowResult.warnings.any {
+                it.contains("beyond depth", ignoreCase = true) && it.contains("onEntryTap")
+            },
+            "expected a beyond-depth warning resolving \"onEntryTap\" but got: ${shallowResult.warnings}",
+        )
+
+        val deepFiles = listOf(
+            parser.parse("AppRootDeep.kt", appRootSource()),
+            parser.parse("AggregatorDeep.kt", aggregatorSource()),
+            parser.parse("DetailDeep.kt", detailSource()),
+        )
+        val deepResult = NavEdgeScanner().scan(deepFiles)
+        assertEquals(
+            listOf(
+                NavEdge(
+                    "com.example.regressiondepth.aggregator.AggregatorRoute",
+                    "com.example.regressiondepth.detail.DetailRoute",
+                ),
+            ),
+            deepResult.edges,
         )
     }
 
@@ -328,129 +596,17 @@ class NavEdgeScannerTest {
     }
 
     @Test
-    fun `a non-standard-named callback with an explicit NavKey parameter type is found via declared type, not name`() {
-        val file = parser.parse(
-            "TypedDirect.kt",
-            """
-            package com.example.typeddirect
-
-            import androidx.navigation3.runtime.NavKey
-            import androidx.navigation3.runtime.entry
-
-            object TypedSourceRoute : NavKey
-            object TypedTargetRoute : NavKey
-
-            fun registerTypedDirect(goTo: (NavKey) -> Unit) {
-                entry<TypedSourceRoute> { goTo(TypedTargetRoute) }
-                entry<TypedTargetRoute> { TypedTargetScreen() }
-            }
-
-            fun TypedTargetScreen() = Unit
-            """.trimIndent(),
-        )
-
-        val result = NavEdgeScanner().scan(listOf(file))
-
-        assertEquals(
-            listOf(NavEdge("com.example.typeddirect.TypedSourceRoute", "com.example.typeddirect.TypedTargetRoute")),
-            result.edges,
-        )
-    }
-
-    @Test
-    fun `a callback parameter typed to a specific known route (not NavKey itself) is also recognized`() {
-        val file = parser.parse(
-            "TypedRouteSpecific.kt",
-            """
-            package com.example.typedroutespecific
-
-            import androidx.navigation3.runtime.NavKey
-            import androidx.navigation3.runtime.entry
-
-            object TypedRouteSpecificSource : NavKey
-            object TypedRouteSpecificTarget : NavKey
-
-            fun registerTypedRouteSpecific(goTo: (TypedRouteSpecificTarget) -> Unit) {
-                entry<TypedRouteSpecificSource> { goTo(TypedRouteSpecificTarget) }
-                entry<TypedRouteSpecificTarget> { TypedRouteSpecificTargetScreen() }
-            }
-
-            fun TypedRouteSpecificTargetScreen() = Unit
-            """.trimIndent(),
-        )
-
-        val result = NavEdgeScanner().scan(listOf(file))
-
-        assertEquals(
-            listOf(
-                NavEdge(
-                    "com.example.typedroutespecific.TypedRouteSpecificSource",
-                    "com.example.typedroutespecific.TypedRouteSpecificTarget",
-                ),
-            ),
-            result.edges,
-        )
-    }
-
-    @Test
-    fun `a non-standard-named callback threaded through wrapper functions is found by declared type at the call site`() {
-        // Mirrors pattern (i)'s callback-threading shape (FeatureAScreen references its callback by
-        // value, not by invoking it, forcing reverse-threading to the wiring call site) but the
-        // wiring call site forwards straight into the app's own NavKey-typed callback instead of a
-        // name-matched navigateTo(...) call.
-        val file = parser.parse(
-            "TypedThreaded.kt",
-            """
-            package com.example.typedthreaded
-
-            import androidx.navigation3.runtime.EntryProviderScope
-            import androidx.navigation3.runtime.NavKey
-            import androidx.navigation3.runtime.entry
-            import androidx.navigation3.runtime.entryProvider
-
-            object ThreadedFeatureRoute : NavKey
-            object ThreadedDestRoute : NavKey
-
-            fun threadedAppNavHost(onNavigate: (NavKey) -> Unit) {
-                entryProvider<NavKey> {
-                    entry<ThreadedDestRoute> { ThreadedDestScreen() }
-                    threadedFeatureNavEntries(goTo = { onNavigate(ThreadedDestRoute) })
-                }
-            }
-
-            fun EntryProviderScope<NavKey>.threadedFeatureNavEntries(goTo: (NavKey) -> Unit) {
-                entry<ThreadedFeatureRoute> { ThreadedFeatureScreen(goTo) }
-            }
-
-            fun ThreadedDestScreen() = Unit
-
-            fun ThreadedFeatureScreen(goTo: (NavKey) -> Unit) {
-                ThreadedButton(onClick = goTo)
-            }
-
-            fun ThreadedButton(onClick: (NavKey) -> Unit) = Unit
-            """.trimIndent(),
-        )
-
-        val result = NavEdgeScanner().scan(listOf(file))
-
-        assertEquals(
-            listOf(NavEdge("com.example.typedthreaded.ThreadedFeatureRoute", "com.example.typedthreaded.ThreadedDestRoute")),
-            result.edges,
-        )
-    }
-
-    @Test
     fun `a navigate call qualified with its parent route disambiguates between sealed-hierarchy siblings sharing a leaf name`() {
         // TodoRoute.Detail and NoteRoute.Detail are two different sealed-hierarchy siblings that
         // happen to share the leaf simple name "Detail" (see NavNode's own kdoc for this exact
-        // shape). navigateTo(TodoRoute.Detail) carries enough information in its own qualifier to
-        // pick the right one without guessing.
+        // shape). backStack.add(TodoRoute.Detail) carries enough information in its own qualifier
+        // to pick the right one without guessing.
         val file = parser.parse(
             "SiblingRoutes.kt",
             """
             package com.example.siblings
 
+            import androidx.navigation3.runtime.NavBackStack
             import androidx.navigation3.runtime.NavKey
             import androidx.navigation3.runtime.entry
 
@@ -465,14 +621,14 @@ class NavEdgeScannerTest {
             object ListRoute : NavKey
 
             fun registerSiblings() {
-                entry<ListRoute> { navigateTo(TodoRoute.Detail) }
+                val backStack = NavBackStack<NavKey>()
+                entry<ListRoute> { backStack.add(TodoRoute.Detail) }
                 entry<TodoRoute.Detail> { TodoDetailScreen() }
                 entry<NoteRoute.Detail> { NoteDetailScreen() }
             }
 
             fun TodoDetailScreen() = Unit
             fun NoteDetailScreen() = Unit
-            fun navigateTo(route: NavKey) = Unit
             """.trimIndent(),
         )
 
@@ -490,7 +646,7 @@ class NavEdgeScannerTest {
 
     @Test
     fun `a bare unqualified reference matching multiple sibling leaf names is still dropped with a warning`() {
-        // Same sibling shape as above, but the navigate call omits the qualifier entirely, so
+        // Same sibling shape as above, but the mutation call omits the qualifier entirely, so
         // there's genuinely nothing in the source to disambiguate with - this must still warn
         // rather than guess.
         val file = parser.parse(
@@ -498,6 +654,7 @@ class NavEdgeScannerTest {
             """
             package com.example.baresiblings
 
+            import androidx.navigation3.runtime.NavBackStack
             import androidx.navigation3.runtime.NavKey
             import androidx.navigation3.runtime.entry
 
@@ -512,14 +669,14 @@ class NavEdgeScannerTest {
             object ListRoute : NavKey
 
             fun registerBareSiblings() {
-                entry<ListRoute> { navigateTo(Detail) }
+                val backStack = NavBackStack<NavKey>()
+                entry<ListRoute> { backStack.add(Detail) }
                 entry<TodoRoute.Detail> { TodoDetailScreen() }
                 entry<NoteRoute.Detail> { NoteDetailScreen() }
             }
 
             fun TodoDetailScreen() = Unit
             fun NoteDetailScreen() = Unit
-            fun navigateTo(route: NavKey) = Unit
             """.trimIndent(),
         )
 
@@ -535,12 +692,12 @@ class NavEdgeScannerTest {
     @Test
     fun `a bare reference disambiguated via the call site's own import, idiomatic Kotlin's avoid-repeating-the-qualifier pattern`() {
         // Same sibling shape as the two tests above, but this time the routes are declared in one
-        // file and the navigate call lives in a *different* file that writes
-        // `import com.example.siblingsimport.TodoRoute.Detail` and then calls `navigateTo(Detail)`
-        // bare - the idiomatic-Kotlin way to avoid repeating the qualifier at every call site.
-        // There's no written qualifier at the call site to narrow with (same as the bare-reference
-        // test above), but the import alone is enough to pick TodoRoute.Detail over NoteRoute.Detail
-        // without needing type resolution.
+        // file and the mutation call lives in a *different* file that writes
+        // `import com.example.siblingsimport.TodoRoute.Detail` and then calls
+        // `backStack.add(Detail)` bare - the idiomatic-Kotlin way to avoid repeating the qualifier
+        // at every call site. There's no written qualifier at the call site to narrow with (same
+        // as the bare-reference test above), but the import alone is enough to pick
+        // TodoRoute.Detail over NoteRoute.Detail without needing type resolution.
         val routes = parser.parse(
             "SiblingRoutesForImport.kt",
             """
@@ -571,6 +728,7 @@ class NavEdgeScannerTest {
             """
             package com.example.appimport
 
+            import androidx.navigation3.runtime.NavBackStack
             import androidx.navigation3.runtime.NavKey
             import androidx.navigation3.runtime.entry
             import com.example.siblingsimport.TodoRoute.Detail
@@ -578,10 +736,9 @@ class NavEdgeScannerTest {
             object ListRoute : NavKey
 
             fun registerAppImport() {
-                entry<ListRoute> { navigateTo(Detail) }
+                val backStack = NavBackStack<NavKey>()
+                entry<ListRoute> { backStack.add(Detail) }
             }
-
-            fun navigateTo(route: NavKey) = Unit
             """.trimIndent(),
         )
 
@@ -611,6 +768,7 @@ class NavEdgeScannerTest {
             """
             package com.example.qualifierfalsepositive
 
+            import androidx.navigation3.runtime.NavBackStack
             import androidx.navigation3.runtime.NavKey
             import androidx.navigation3.runtime.entry
 
@@ -623,12 +781,12 @@ class NavEdgeScannerTest {
             }
 
             fun register() {
-                entry<ListRoute> { navigateTo(TodoRoute.Detail) }
+                val backStack = NavBackStack<NavKey>()
+                entry<ListRoute> { backStack.add(TodoRoute.Detail) }
                 entry<Foo.TodoRoute.Detail> { NestedDetailScreen() }
             }
 
             fun NestedDetailScreen() = Unit
-            fun navigateTo(route: NavKey) = Unit
             """.trimIndent(),
         )
 
@@ -642,19 +800,21 @@ class NavEdgeScannerTest {
     }
 
     @Test
-    fun `a callback pass-through that bottoms out at a local val (not a parameter) in a zero-param root composable dead-ends without leaking sibling edges`() {
-        // Regression test: FeatureCRoute's only reachable callback (onBack) is threaded up through
-        // featureCNavEntries -> AppNavHost -> App, where App's popBack is a *local val*, not a
-        // function parameter, inside App (which itself has zero parameters). Per
-        // resolveBoundExpression's pass-through branch, that must be a dead end: no edge for
-        // FeatureCRoute at all. In particular FeatureCRoute must NOT pick up the edge that belongs
-        // to featureANavEntries's own, entirely unrelated onSomeAction callback (wired to a sibling
-        // call in the same entryProvider block), nor a self-loop back to itself.
+    fun `a callback pass-through that bottoms out at a local val with a plain, non-mutating body dead-ends without leaking sibling edges`() {
+        // Regression test (adapted from PR #63's fix): FeatureCRoute's only reachable callback
+        // (onBack) is threaded up through featureCNavEntries -> AppNavHost -> App, where App's
+        // popBack is a *local val*, not a function parameter, whose body just calls a plain
+        // restartApp() with no NavBackStack mutation anywhere in it. That must be a dead end: no
+        // edge for FeatureCRoute at all. In particular FeatureCRoute must NOT pick up the edge that
+        // belongs to featureANavEntries's own, entirely unrelated onSomeAction callback (wired to a
+        // sibling call in the same entryProvider block, and made real here via a genuine
+        // NavBackStack so there is something real to *not* leak).
         val appFile = parser.parse(
             "App.kt",
             """
             package com.example.app
 
+            import androidx.navigation3.runtime.NavBackStack
             import androidx.navigation3.runtime.NavKey
             import androidx.navigation3.runtime.entryProvider
             import com.example.featurea.FeatureARoute
@@ -676,14 +836,14 @@ class NavEdgeScannerTest {
             }
 
             fun App() {
+                val backStack = NavBackStack<NavKey>()
                 val popBack: () -> Unit = { restartApp() }
-                val navigateTo: (NavKey) -> Unit = { key -> pushRoute(key) }
+                val navigateTo: (NavKey) -> Unit = { key -> backStack.add(key) }
                 AppNavHost(popBack = popBack, navigateTo = navigateTo)
             }
 
             fun NavDisplay(entryProvider: Any) = Unit
             fun restartApp() = Unit
-            fun pushRoute(route: NavKey) = Unit
             """.trimIndent(),
         )
         val featureA = parser.parse(
@@ -760,24 +920,26 @@ class NavEdgeScannerTest {
 
     @Test
     fun `an onBack chain that transitively re-enters the nav-host composable must not leak that composable's unrelated sibling wiring`() {
-        // Regression test for a real false-positive edge. FeatureCRoute's onBack is bound, at its
-        // one wiring call site inside AppNavHost, to a lambda that calls resetNavigation() - a
-        // helper that (for a reason unrelated to FeatureCRoute, e.g. tearing down and rebuilding
-        // the whole nav graph on some error path) calls AppNavHost(...) again.
+        // Regression test for a real false-positive edge (adapted from PR #63's fix). FeatureCRoute's
+        // onBack is bound, at its one wiring call site inside AppNavHost, to a lambda that calls
+        // resetNavigation() - a helper that (for a reason unrelated to FeatureCRoute, e.g. tearing
+        // down and rebuilding the whole nav graph on some error path) calls AppNavHost(...) again,
+        // with inert, non-mutating callbacks.
         //
-        // Known-function-call resolution (case 3 in CallGraphTraversal's kdoc) then re-enters
-        // AppNavHost's *entire* body at the next depth - which also textually contains
+        // Known-function-call resolution (case 3 in CallGraphTraversal's kdoc) then tries to
+        // re-enter AppNavHost's *entire* body at the next depth - which also textually contains
         // featureANavEntries's own, completely unrelated onSomeAction wiring, since that wiring's
         // inline lambda argument is written at its call site *inside* AppNavHost, not inside
-        // featureANavEntries itself. Every navigateTo(...) found while scanning that reopened body
-        // was, before the fix, misattributed as reachable from FeatureCRoute - even though
-        // resetNavigation() rebuilding the nav graph from scratch says nothing about FeatureCRoute
-        // itself being able to reach FeatureARoute.
+        // featureANavEntries itself. Before the fix this would have been misattributed as reachable
+        // from FeatureCRoute; entryHostingFunctions must still refuse it under the new detection
+        // mode. FeatureARoute's own edge (found via the real App() bootstrap's NavBackStack) must
+        // survive untouched.
         val appFile = parser.parse(
             "App.kt",
             """
             package com.example.app
 
+            import androidx.navigation3.runtime.NavBackStack
             import androidx.navigation3.runtime.NavKey
             import androidx.navigation3.runtime.entryProvider
             import com.example.featurea.FeatureARoute
@@ -794,6 +956,12 @@ class NavEdgeScannerTest {
                         featureCNavEntries(onBack = { resetNavigation() })
                     },
                 )
+            }
+
+            fun App() {
+                val backStack = NavBackStack<NavKey>()
+                val navigateTo: (NavKey) -> Unit = { key -> backStack.add(key) }
+                AppNavHost(popBack = {}, navigateTo = navigateTo)
             }
 
             fun resetNavigation() {
@@ -842,9 +1010,11 @@ class NavEdgeScannerTest {
 
         val result = NavEdgeScanner().scan(listOf(appFile, featureA, featureC))
 
-        // FeatureARoute's own edge (from its own onSomeAction wiring) is legitimate and must
-        // survive. FeatureCRoute must contribute nothing - resetNavigation() rebuilding the nav
-        // graph is not FeatureCRoute navigating anywhere.
+        // FeatureARoute's own edge (from its own onSomeAction wiring, resolved through the real
+        // App() bootstrap's NavBackStack) is legitimate and must survive - it happens to be a
+        // self-loop since onSomeAction navigates to FeatureARoute itself. FeatureCRoute must
+        // contribute nothing - resetNavigation() rebuilding the nav graph is not FeatureCRoute
+        // navigating anywhere.
         assertEquals(
             setOf(NavEdge("com.example.featurea.FeatureARoute", "com.example.featurea.FeatureARoute")),
             result.edges.toSet(),
@@ -852,57 +1022,27 @@ class NavEdgeScannerTest {
     }
 
     @Test
-    fun `a callback relying purely on type inference, with no explicit annotation, is not found - known limitation`() {
-        // Matches the documented gap: a local val lambda with an untyped parameter is invisible to
-        // this purely-syntactic scanner regardless of naming, since it isn't even tracked as a live
-        // callable (only named-function value parameters, which always carry an explicit type in
-        // Kotlin, are). No edge, no warning, no crash.
-        val file = parser.parse(
-            "UntypedWrapper.kt",
-            """
-            package com.example.untyped
-
-            import androidx.navigation3.runtime.NavKey
-            import androidx.navigation3.runtime.entry
-
-            object UntypedSourceRoute : NavKey
-            object UntypedTargetRoute : NavKey
-
-            fun registerUntyped() {
-                val goSomewhere = { key -> backStack.add(key) }
-                entry<UntypedSourceRoute> { goSomewhere(UntypedTargetRoute) }
-                entry<UntypedTargetRoute> { UntypedTargetScreen() }
-            }
-
-            fun UntypedTargetScreen() = Unit
-            """.trimIndent(),
-        )
-
-        val result = NavEdgeScanner().scan(listOf(file))
-
-        assertTrue(result.edges.isEmpty(), "expected no edges but found: ${result.edges}")
-    }
-
-    @Test
-    fun `a route reached only via a shared wrapper's content slot must not inherit an unrelated aggregator's own navigateTo calls`() {
-        // Regression test for a second, distinct real false-positive bug (different mechanism than
-        // the entry-hosting-function-reentry bug above, and NOT fixed by that guard). FeatureScaffold
-        // is a shared, general-purpose wrapper used by multiple unrelated routes and takes two
-        // function-typed parameters: onBack (a real navigation callback) and content (a plain UI
-        // composition slot invoked once, inline, in the wrapper's own body).
+    fun `a route reached only via a shared wrapper's content slot must not inherit an unrelated aggregator's own mutation calls`() {
+        // Regression test for a second, distinct real false-positive bug (adapted from PR #65's
+        // fix; different mechanism than the entry-hosting-function-reentry bug above, and NOT
+        // fixed by that guard). FeatureScaffold is a shared, general-purpose wrapper used by
+        // multiple unrelated routes and takes two function-typed parameters: onBack (a real
+        // navigation callback) and content (a plain UI composition slot invoked once, inline, in
+        // the wrapper's own body).
         //
         // RouteB.Top is the real navigation aggregator: its own entry<RouteB.Top> registration wires
-        // 4 real, legitimate navigateTo calls (to RouteB.Edit, RouteC, RouteA, RouteD), reached
-        // through FeatureScaffold's content slot.
+        // 4 real, legitimate mutation calls (to RouteB.Edit, RouteC, RouteA, RouteD, via the real
+        // navigateTo closure threaded from App()'s NavBackStack), reached through FeatureScaffold's
+        // content slot.
         //
-        // RouteC has no navigateTo call anywhere in its own reachable code - its only callback is a
+        // RouteC has no mutation call anywhere in its own reachable code - its only callback is a
         // plain onBack threaded through FeatureScaffold, same as RouteB.Top's onBack. Because
         // FeatureScaffold's body invokes content() (case 2's "parameter reference" reverse-edge
         // machinery treats this exactly like invoking onBack), RouteC's search - while resolving its
         // own onBack through FeatureScaffold - also stumbles onto FeatureScaffold's "content"
         // parameter being live, and reverse-searches every project-wide call site of FeatureScaffold,
         // including RouteB.Top's, whose content argument is a lambda holding RouteB.Top's own real
-        // navigateTo calls. Before the fix, that lambda was scanned as if it were reachable from
+        // mutation calls. Before the fix, that lambda was scanned as if it were reachable from
         // RouteC, producing RouteC's edges as an exact, target-for-target copy of RouteB.Top's own
         // edges - including a nonsensical self-loop, since one of RouteB.Top's real edges targets
         // RouteC itself.
@@ -1007,6 +1147,7 @@ class NavEdgeScannerTest {
             """
             package com.example.app
 
+            import androidx.navigation3.runtime.NavBackStack
             import androidx.navigation3.runtime.NavKey
             import androidx.navigation3.runtime.entry
             import androidx.navigation3.runtime.entryProvider
@@ -1022,6 +1163,12 @@ class NavEdgeScannerTest {
                     routeCNavEntries(popBack = popBack)
                     entry<RouteD> { RouteDScreen() }
                 }
+            }
+
+            fun App() {
+                val backStack = NavBackStack<NavKey>()
+                val navigateTo: (NavKey) -> Unit = { key -> backStack.add(key) }
+                AppNavHost(navigateTo = navigateTo, popBack = {})
             }
 
             fun RouteAScreen() = Unit
@@ -1051,10 +1198,10 @@ class NavEdgeScannerTest {
     }
 
     @Test
-    fun `a route reached only via a shared wrapper's content slot must not inherit an unrelated aggregator's own navigateTo calls, when the aggregator binds content by callable reference instead of an inline lambda`() {
+    fun `a route reached only via a shared wrapper's content slot must not inherit an unrelated aggregator's own mutation calls, when the aggregator binds content by callable reference instead of an inline lambda`() {
         // Same false-positive mechanism and same fixture shape as the test above, but RouteB.Top
         // binds FeatureScaffold's content slot with a callable reference (::RouteBTopContent)
-        // instead of writing the navigate-laden code as an inline lambda literal at the call site.
+        // instead of writing the mutation-laden code as an inline lambda literal at the call site.
         // resolveBoundExpression's `is KtCallableReferenceExpression` branch is only guarded against
         // re-entering an entryHostingFunction (a function that itself hosts entry<X> {} calls) - it
         // is NOT guarded against resolving into a plain named function whose *call site* (the
@@ -1101,6 +1248,7 @@ class NavEdgeScannerTest {
             package com.example.routeb
 
             import androidx.navigation3.runtime.EntryProviderScope
+            import androidx.navigation3.runtime.NavBackStack
             import androidx.navigation3.runtime.NavKey
             import androidx.navigation3.runtime.entry
             import com.example.shared.FeatureScaffold
@@ -1120,18 +1268,17 @@ class NavEdgeScannerTest {
                 entry<RouteB.Edit> { RouteBEditScreen(onBack = popBack) }
             }
 
-            // A plain top-level function - written directly in navigateTo-call form (matching
-            // pattern (i)'s inline shape) so this fixture doesn't need to also thread a navigateTo
-            // parameter through a callable reference target, which is a separate, unrelated
-            // question from the one this test is isolating.
-            fun RouteBTopContent() {
-                navigateTo(RouteB.Edit)
-                navigateTo(RouteC)
-                navigateTo(RouteA)
-                navigateTo(RouteD)
+            // A plain top-level function - written directly in backStack.add(...) form (matching
+            // the direct-construction-and-use shape) so this fixture doesn't need to also thread a
+            // navigateTo parameter through a callable reference target, which is a separate,
+            // unrelated question from the one this test is isolating.
+            fun RouteBTopContent(backStack: NavBackStack<NavKey>) {
+                backStack.add(RouteB.Edit)
+                backStack.add(RouteC)
+                backStack.add(RouteA)
+                backStack.add(RouteD)
             }
 
-            fun navigateTo(route: NavKey) = Unit
             fun RouteBEditScreen(onBack: () -> Unit) = Unit
             """.trimIndent(),
         )
@@ -1163,6 +1310,7 @@ class NavEdgeScannerTest {
             """
             package com.example.app
 
+            import androidx.navigation3.runtime.NavBackStack
             import androidx.navigation3.runtime.NavKey
             import androidx.navigation3.runtime.entry
             import androidx.navigation3.runtime.entryProvider
@@ -1180,6 +1328,11 @@ class NavEdgeScannerTest {
                 }
             }
 
+            fun App() {
+                val backStack = NavBackStack<NavKey>(RouteA)
+                AppNavHost(popBack = {})
+            }
+
             fun RouteAScreen() = Unit
             fun RouteDScreen() = Unit
             """.trimIndent(),
@@ -1188,7 +1341,9 @@ class NavEdgeScannerTest {
         val result = NavEdgeScanner().scan(listOf(shared, routeA, routeD, routeB, routeC, appNavHost))
 
         // RouteB.Top's own 4 real edges (via RouteBTopContent, reached by callable reference) must
-        // survive untouched - same real-edge set as the inline-lambda variant above.
+        // survive untouched - same real-edge set as the inline-lambda variant above. RouteBTopContent's
+        // own `backStack` parameter is recognized as a NavBackStack alias directly (see
+        // findBackStackAliasNames), with no threading needed from App()'s anchor instance.
         assertEquals(
             setOf(
                 NavEdge("com.example.routeb.RouteB.Top", "com.example.routeb.RouteB.Edit"),

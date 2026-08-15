@@ -15,16 +15,16 @@ import io.github.hayatoyagi.composepreviewtoolkit.sample.featureb.featureBNavEnt
 object HomeRoute : NavKey
 
 /**
- * App-level Nav3 host. Mirrors medimo-android's real wiring shape: the `navigateTo(FeatureBRoute)`
- * call for feature-a's "proceed" action is written *here*, at the app level, passed into
- * [featureANavEntries] as the `onProceedClick` callback argument — not inside feature-a's own
- * `entry<FeatureARoute> {}` block. This is pattern (i) of the two navigation-wiring shapes the
- * nav-graph edge detector supports.
- *
- * [featureBNavEntries] is passed [navigateTo] itself (not a single-purpose callback like
- * `onProceedClick`) — its own `entry<FeatureBRoute> {}` block calls `navigateTo(FeatureARoute)`
- * directly, inside `feature-b`'s own source, demonstrating pattern (ii): see
- * `FeatureBNavEntries.kt`'s kdoc.
+ * App-level Nav3 host, and the one place [backStack] — the app's single, real
+ * `NavBackStack<NavKey>` — is constructed. [navigateTo] wraps mutating it, and demonstrates every
+ * shape the nav-graph edge detector's `NavBackStack`-mutation tracking supports:
+ * - Called inline, right where it's declared, for [HomeRoute]'s own "go to feature A" action.
+ * - Threaded as a plain zero-arg callback into [featureANavEntries]'s `onProceedClick` and only
+ *   actually invoked *here*, at the app level, not inside feature-a's own `entry<FeatureARoute> {}`
+ *   block.
+ * - Handed to [featureBNavEntries] as the closure itself (not a single-purpose callback) — its own
+ *   `entry<FeatureBRoute> {}` block calls it directly, inside `feature-b`'s own source: see
+ *   `FeatureBNavEntries.kt`'s kdoc.
  *
  * `entry<T>` is not imported here — see `feature-a`'s `FeatureANavEntries.kt` kdoc for why: it's a
  * member function of `EntryProviderScope`, resolved via `entryProvider {}`'s own receiver.

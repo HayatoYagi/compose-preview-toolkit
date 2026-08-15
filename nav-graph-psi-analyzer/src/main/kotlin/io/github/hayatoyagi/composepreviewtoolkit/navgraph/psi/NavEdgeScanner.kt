@@ -13,6 +13,7 @@ import org.jetbrains.kotlin.psi.KtNameReferenceExpression
 import org.jetbrains.kotlin.psi.KtNamedFunction
 import org.jetbrains.kotlin.psi.KtNullableType
 import org.jetbrains.kotlin.psi.KtParameter
+import org.jetbrains.kotlin.psi.KtProperty
 import org.jetbrains.kotlin.psi.KtTypeReference
 import org.jetbrains.kotlin.psi.KtUserType
 import org.jetbrains.kotlin.psi.ValueArgument
@@ -20,10 +21,11 @@ import org.jetbrains.kotlin.psi.ValueArgument
 /**
  * The result of [NavEdgeScanner.scan]: [edges] is the best-effort, deduplicated list of detected
  * navigation edges; [warnings] is every case the scan gave up on rather than risk guessing wrong —
- * ambiguous callee names, call-graph traversal exceeding [NavEdgeScanner]'s configured depth
- * bound, and bound-argument expressions the traversal couldn't make sense of. Exposed as data
- * (not just logged) specifically so tests can assert on *why* an edge was or wasn't found: none of
- * these cases should ever throw and fail the whole scan.
+ * multiple/ambiguous `NavBackStack` instances, ambiguous callee names, call-graph traversal
+ * exceeding [NavEdgeScanner]'s configured depth bound, and bound-argument expressions the
+ * traversal couldn't make sense of. Exposed as data (not just logged) specifically so tests can
+ * assert on *why* an edge was or wasn't found: none of these cases should ever throw and fail the
+ * whole scan.
  */
 data class NavEdgeScanResult(
     val edges: List<NavEdge>,
@@ -37,28 +39,54 @@ data class NavEdgeScanResult(
  *
  * ## Algorithm
  *
- * For every `entry<X> { ... }` registration (found via [findEntryRegistrations], shared with
- * [NavNodeScanner]), this performs a breadth-first search over a call graph built *lazily* while
- * traversing — there is no separate up-front "build the whole call graph" pass, since the
- * interesting part of the graph (which caller supplied which argument to which parameter) can only
- * be discovered by looking at call sites as they become relevant to the search, not ahead of time.
- * Each BFS step processes a "search context": a PSI subtree to scan (initially the entry
- * registration's trailing lambda body) plus the set of the *enclosing* declaration's function-typed
- * parameter names that are lexically live at that point (its "closure environment").
+ * Navigation3 has no prescribed "navigate" function — an app's `NavBackStack<NavKey>` is just a
+ * mutable list, and every project writes its own wrapper(s) around mutating it, under whatever
+ * name and however many layers of indirection it likes. Rather than chasing any particular
+ * wrapper's name or declared shape, this anchors on the one thing that *is* real Nav3 API: the
+ * tracked `NavBackStack<NavKey>` instance itself (see "Anchor discovery" below), and treats a call
+ * that mutates it — `add`/`addAll` — as the only terminal edge condition. Detection is otherwise
+ * unchanged from before: an `entry<X> { ... }` registration's trailing lambda (found via
+ * [findEntryRegistrations], shared with [NavNodeScanner]) seeds a breadth-first search over a call
+ * graph built *lazily* while traversing, since the interesting part of the graph (which caller
+ * supplied which argument to which parameter) can only be discovered by looking at call sites as
+ * they become relevant to the search, not ahead of time. Each BFS step processes a "search
+ * context": a PSI subtree to scan (initially the entry registration's trailing lambda body) plus
+ * the set of the *enclosing* declaration's function-typed parameter names that are lexically live
+ * at that point (its "closure environment"), plus — new in this version — a small name→expression
+ * substitution map (see "Route-carrying closures" below).
  *
- * Within a context's subtree, every name reference is classified once, in priority order:
+ * ### Anchor discovery
  *
- * 1. **Navigate call by name**: the reference is a call's callee and its simple name is in
- *    [navigateCallNames] → inspect the call's first argument, read as its own dotted reference
- *    chain (e.g. `["TodoRoute", "Detail"]` for a qualified reference/constructor call
- *    `TodoRoute.Detail`, or just `["Detail"]` for a bare one). Every chain, qualified or bare,
- *    unambiguous or not, is resolved the same way to a single canonical fully-qualified name before
- *    any route lookup happens: its root identifier is resolved to its own real qualified name via
- *    the call site's file imports if one matches, else assumed to resolve within the call site's own
- *    file package, and the rest of the chain is appended onto that. That exact fully-qualified name
- *    is then looked up among known routes - a hit is the target, unconditionally; a miss means the
- *    call is dropped with a warning rather than guessed (see
- *    [CallGraphTraversal.resolveQualifiedTarget]'s kdoc). Terminal — not traversed further.
+ * Once per [scan] (not once per route), [findBackStackAliasNames] computes the set of identifier
+ * names presumed to denote *the* single, app-wide shared `NavBackStack` instance: the property (if
+ * any) a `NavBackStack<NavKey>(...)` construction call is bound to (its type argument is always
+ * syntactically present at the construction site, unlike a scattered declared-callback-type
+ * annotation at every downstream layer), plus every parameter, anywhere in the scanned files, whose
+ * *declared* type (as written) is `NavBackStack`. Only a single, app-wide shared instance is
+ * supported: the instant more than one `NavBackStack(...)` construction site is found anywhere in
+ * the scanned files, this refuses with one warning and returns no aliases at all, rather than
+ * guessing which instance matters to which registration — the same "don't guess" philosophy as
+ * everywhere else in this class. Treating *every* `NavBackStack`-typed parameter as another alias
+ * for the same tracked instance (rather than proving each one is transitively bound to the real
+ * anchor via the call-graph machinery below) is a deliberate simplification this scope limit makes
+ * safe: there is nothing else a `NavBackStack`-typed name could denote once multiple independent
+ * instances have already been refused.
+ *
+ * ### Within a context's subtree
+ *
+ * Every name reference is classified once, in priority order:
+ *
+ * 1. **Back-stack mutation call**: the reference is a call's callee (`add`/`addAll`), the call is
+ *    written as `<receiver>.add(...)` / `<receiver>.addAll(...)` with a bare-name receiver, and
+ *    that receiver's name is one of [findBackStackAliasNames]'s alias names → the call is a
+ *    terminal navigate edge. Checked *before* case 2 so a live parameter that happens to be named
+ *    `add` can never shadow a real mutation call. Route-argument resolution depends on the mutation
+ *    method's arity (`add(element)` vs. `add(index, element)` vs. `addAll(elements)` vs.
+ *    `addAll(index, elements)` — see [CallGraphTraversal.resolveMutationRouteArguments]'s kdoc);
+ *    each resolved route expression is turned into a target via the *unchanged* qualified-route
+ *    resolution machinery from PR #62 (see
+ *    [CallGraphTraversal.resolveQualifiedTarget]'s kdoc) — a miss there is dropped with a warning,
+ *    never guessed. Terminal — not traversed further.
  * 2. **Parameter reference**: the reference's simple name matches a function-typed parameter that
  *    is live in the current context — *regardless* of whether the reference is itself a call's
  *    callee (`onClick()`) or merely passed along as a value to some other call
@@ -71,15 +99,10 @@ data class NavEdgeScanResult(
  *    forwards its own parameter under the same name one level up) — that case recurses through
  *    this same handling again, costing one further hop each time, which is exactly how this
  *    module resolves `sample/feature-a`'s callback-threaded pattern without any special-casing
- *    (see class kdoc).
- *
- *    When such a reference is also itself a call's callee (e.g. `onProceedClick(FeatureBRoute)`),
- *    it's additionally checked as a **navigate call by declared type**: if the parameter's
- *    function-type signature, as written (e.g. `(NavKey) -> Unit`), has a parameter type whose
- *    simple name is `NavKey` or one of the routes found by [NavNodeScanner], this call site is
- *    treated as a terminal navigate edge exactly like case 1 — same argument resolution, run
- *    alongside the reachability threading above rather than replacing it. Purely syntactic: a
- *    parameter with no explicit type annotation is never matched this way.
+ *    (see class kdoc). If the reference is itself a call — e.g. `navigateTo(FeatureBRoute)` where
+ *    `navigateTo` is a `(NavKey) -> Unit`-typed parameter, invoked directly — its own argument
+ *    expressions are remembered (see "Route-carrying closures" below) and carried alongside the
+ *    reverse search.
  *
  *    The reverse edge's project-wide "every call site" search is unaware of *which* call site
  *    the current route's search actually descended from — by design, since the whole point is
@@ -90,45 +113,93 @@ data class NavEdgeScanResult(
  *    a `content` slot): invoking that wrapper's `content` parameter in its own body triggers this
  *    same reverse search on `content`, which finds every route that happens to use the same
  *    wrapper — including one whose `content` argument is a lambda holding an unrelated aggregator
- *    route's own real `navigateTo(...)` calls. [CallGraphTraversal] must never resolve into such a
- *    lambda: see [CallGraphTraversal.blockedAsAnotherRoutesEntryRegistration]'s kdoc.
- * 3. **Known function call**: the reference is a call's callee and its simple name resolves
- *    unambiguously to another parsed [KtNamedFunction] → continue the search from that function's
- *    body at depth + 1, with that function's *own* function-typed parameters as the new live set
- *    (Kotlin scoping: a callee's parameters are not the caller's). Refused — dropped with a
- *    warning, not traversed — when the resolved function is one of [NavEdgeScanner]'s
- *    `entryHostingFunctions` (see [NavEdgeScanner.findEntryHostingFunctions]'s kdoc): a function
- *    that hosts `entry<X> {}` registrations, directly or transitively, is nav-graph
- *    *construction*, and re-entering its body from here would pull in every sibling registration
- *    wired inside it — including their own, entirely unrelated navigate calls — as if they were
- *    reachable from whatever route's search happened to rediscover it. The same refusal applies to
- *    the equivalent callable-reference case in [resolveBoundExpression].
+ *    route's own real mutation calls. [CallGraphTraversal] must never resolve into such a lambda:
+ *    see [CallGraphTraversal.blockedAsAnotherRoutesEntryRegistration]'s kdoc.
+ * 3. **Local-`val`-closure or known function call**: the reference is a call's callee, isn't a live
+ *    parameter, and:
+ *    - resolves to a local property in the *enclosing* declaration's own body with a
+ *      lambda/callable-reference initializer (see
+ *      [CallGraphTraversal.resolveLocalCallbackReference]'s kdoc) → treated exactly like case 2's
+ *      reverse edge, but without the project-wide call-site search: a local declaration is only
+ *      ever visible within its own enclosing function, so there is exactly one place its value
+ *      could have come from — its own initializer, right there. Tried *before* the known-function
+ *      fallback below, since in real Kotlin scoping a local declaration shadows an
+ *      identically-named outer parameter or top-level function anyway. This is what lets
+ *      `sample/app/AppNavHost.kt`'s `val navigateTo: (NavKey) -> Unit = { key -> backStack.add(key) }`
+ *      — a local closure, not a function parameter — be found the same way a parameter-threaded
+ *      callback is.
+ *    - otherwise, its simple name resolves unambiguously to another parsed [KtNamedFunction] →
+ *      continue the search from that function's body at depth + 1, with that function's *own*
+ *      function-typed parameters as the new live set (Kotlin scoping: a callee's parameters are
+ *      not the caller's). Refused — dropped with a warning, not traversed — when the resolved
+ *      function is one of [NavEdgeScanner]'s `entryHostingFunctions` (see
+ *      [NavEdgeScanner.findEntryHostingFunctions]'s kdoc): a function that hosts `entry<X> {}`
+ *      registrations, directly or transitively, is nav-graph *construction*, and re-entering its
+ *      body from here would pull in every sibling registration wired inside it — including their
+ *      own, entirely unrelated mutation calls — as if they were reachable from whatever route's
+ *      search happened to rediscover it. The same refusal applies to the equivalent
+ *      callable-reference case in [CallGraphTraversal.resolveBoundExpression].
  * 4. Otherwise → ignored. This is the common case (framework/library calls like `Button`, `Column`,
  *    `println` with no matching declaration among the parsed files) and is expected, not an error.
  *
- * A context is only ever processed once per entry registration (tracked by referential identity),
- * which is what guarantees termination in the presence of cycles (mutually recursive functions) —
- * BFS order means the first time a given PSI subtree is reached is always via a shortest path, so
- * revisiting it later via a longer path is always safe to skip. This is a narrower guarantee than
- * it might look: it only dedupes *identical* PSI subtrees, and does nothing to stop a search from
- * *legitimately* discovering an entirely different, much larger subtree via a real call edge — that
- * is what the `entryHostingFunctions` refusal above exists to prevent.
+ * ### Route-carrying closures
+ *
+ * Unlike a plain `() -> Unit` callback, a `(NavKey) -> Unit`-shaped closure like
+ * `navigateTo`/`goTo` carries the *route itself* as its one parameter — the mutation call inside
+ * it (`backStack.add(key)`) refers to that parameter by name, not to a literal route. Resolving
+ * that reference requires knowing what a *specific* invocation actually passed. Whenever a
+ * live-parameter (case 2) or local-`val` (case 3) reference is itself a call, its argument
+ * expressions are captured and, before being carried any further, each is resolved one level
+ * through the *current* context's own `substitutions` map (see
+ * [resolvedThroughSubstitutions]) — so an argument that is itself a bare reference to an
+ * *enclosing* route-carrying closure's own parameter is replaced with whatever that closure's
+ * caller actually bound it to, not left as a name with no meaning outside that closure's body. The
+ * (now doubly-resolved-if-needed) expressions are bound, positionally, to the eventually-resolved
+ * lambda's/function's own declared parameter list the moment one is found (see
+ * [CallGraphTraversal.resolveBoundExpression]'s `KtLambdaExpression`/`KtCallableReferenceExpression`
+ * cases) — becoming that one [SearchContext]'s own `substitutions` map. A back-stack mutation
+ * call's route argument is looked up in this map first (see
+ * [CallGraphTraversal.resolveRouteArgumentAndEmitEdge], which now shares the same
+ * [resolvedThroughSubstitutions] helper) before falling back to resolving it as written.
+ *
+ * Applying this at every hop — not just once, at the mutation call itself — is what lets *any
+ * number* of nested route-carrying closures resolve correctly (e.g. a closure bound to a UI
+ * component's callback parameter that itself just forwards into a second, app-root-level
+ * `navigateTo`-style closure before that one finally reaches `backStack.add(...)`): each hop only
+ * ever substitutes one level, but composes naturally across hops since every hop's *output*
+ * substitutions map is built from arguments already resolved through *its own input* substitutions
+ * — there is no separate "chain the whole way through" step, and none is needed. Still a purely
+ * syntactic, no-general-expression-evaluation mechanism: a closure that *transforms* the value
+ * before forwarding it (not just renaming it), or an implicit `it` parameter (which Kotlin doesn't
+ * expose as a named [org.jetbrains.kotlin.psi.KtLambdaExpression.valueParameters] entry), still
+ * falls through to the same "give up with a warning" handling as any other unresolvable argument.
+ *
+ * A context is only ever processed once per entry registration, keyed on *both* its PSI subtree
+ * (by referential identity) and its `substitutions` map — which is what guarantees termination in
+ * the presence of cycles (mutually recursive functions) while still allowing the same subtree to
+ * be legitimately revisited under different route substitutions: BFS order means the first time a
+ * given (subtree, substitutions) pair is reached is always via a shortest path, so revisiting it
+ * later via a longer path is always safe to skip, but two *different* substitution maps over the
+ * *same* subtree (e.g. four separate `navigateTo(SomeRoute)` calls all bottoming out at the same
+ * shared route-carrying closure body, each with its own route) are genuinely different searches
+ * that must each run. This is a narrower guarantee than it might look: it only dedupes *identical*
+ * (subtree, substitutions) pairs, and does nothing to stop a search from *legitimately* discovering
+ * an entirely different, much larger subtree via a real call edge — that is what the
+ * `entryHostingFunctions` refusal above exists to prevent.
  *
  * Callee-name resolution is deliberately simple-name-based with no type resolution (per the design
  * doc's explicit choice): a same-package match is preferred, then an explicit import match: if
- * still ambiguous, the call is dropped with a warning rather than guessed. Matching a
- * `navigateTo(...)` call's first argument against the route registry follows the same
- * type-resolution-free philosophy, but resolves the written reference to one canonical
- * fully-qualified name via import-then-same-package first (see
+ * still ambiguous, the call is dropped with a warning rather than guessed. Resolving a route
+ * argument follows the same type-resolution-free philosophy, but resolves the written reference to
+ * one canonical fully-qualified name via import-then-same-package first (see
  * [CallGraphTraversal.resolveQualifiedTarget]'s kdoc) rather than filtering candidates by name,
  * since a suffix-based filter can't reliably tell two differently-nested routes that happen to
- * share their trailing segments apart. `NavKey` is the one type name matched literally throughout —
- * it's `androidx.navigation3.runtime.NavKey`, a fixed library API, not a project-specific naming
- * convention.
+ * share their trailing segments apart. `NavBackStack` is the one type name matched literally
+ * throughout for anchor discovery — it's `androidx.navigation3.runtime.NavBackStack`, a fixed
+ * library API, not a project-specific naming convention.
  */
 class NavEdgeScanner(
     private val entryFunctionNames: Set<String> = DEFAULT_ENTRY_FUNCTION_NAMES,
-    private val navigateCallNames: Set<String> = DEFAULT_NAVIGATE_CALL_NAMES,
     private val callGraphResolutionDepth: Int = DEFAULT_CALL_GRAPH_RESOLUTION_DEPTH,
 ) {
     fun scan(files: List<KtFile>): NavEdgeScanResult {
@@ -149,13 +220,13 @@ class NavEdgeScanner(
                 .groupBy({ it.first }, { it.second })
 
         val distinctRoutes = entryRegistrations.map { it.node }.distinctBy { it.qualifiedName }
-        val routeSimpleNames: Set<String> = distinctRoutes.mapTo(mutableSetOf()) { it.simpleName }
         val routesByQualifiedName: Map<String, NavNode> = distinctRoutes.associateBy { it.qualifiedName }
 
         val resolver = CalleeResolver(functionsBySimpleName, callsBySimpleName, warnings)
         val entryHostingFunctions = findEntryHostingFunctions(entryRegistrations, resolver)
         val entryRegistrationLambdas: Set<KtLambdaExpression> =
             entryRegistrations.mapNotNullTo(mutableSetOf()) { it.call.entryRegistrationLambda() }
+        val backStackAliasNames = findBackStackAliasNames(files, warnings)
 
         val edges = LinkedHashSet<NavEdge>()
         entryRegistrations.forEach { registration ->
@@ -164,8 +235,7 @@ class NavEdgeScanner(
             val owningFunction = PsiTreeUtil.getParentOfType(registration.call, KtNamedFunction::class.java)
             val traversal = CallGraphTraversal(
                 sourceRoute = registration.node.qualifiedName,
-                navigateCallNames = navigateCallNames,
-                routeSimpleNames = routeSimpleNames,
+                backStackAliasNames = backStackAliasNames,
                 routesByQualifiedName = routesByQualifiedName,
                 resolver = resolver,
                 maxDepth = callGraphResolutionDepth,
@@ -190,7 +260,7 @@ class NavEdgeScanner(
      *
      * [CallGraphTraversal] must never re-enter one of these via a known-function-call resolution
      * (see its kdoc's case 3): doing so would pull in *every* sibling `entry<X> {}` registration
-     * wired inside that function — including their own, entirely unrelated navigate calls — as if
+     * wired inside that function — including their own, entirely unrelated mutation calls — as if
      * they were reachable from whatever single route's search happened to re-discover it. This is
      * safe to exclude unconditionally because every entry registration already gets its own,
      * correctly-scoped traversal seeded directly at [scan]'s call site above; there is never a
@@ -216,12 +286,54 @@ class NavEdgeScanner(
         return hosts
     }
 
+    /**
+     * Every identifier name, anywhere in [files], presumed to denote *the* single, app-wide shared
+     * `NavBackStack<NavKey>` instance: the property (if any) a `NavBackStack<NavKey>(...)`
+     * construction call is bound to, plus every parameter, anywhere, whose *declared* type (as
+     * written) is `NavBackStack`. See the class kdoc's "Anchor discovery" section for why this is a
+     * deliberately coarse, single-shared-instance-only design, enforced by refusing (with a
+     * warning) rather than guessing the instant more than one construction site is found.
+     */
+    private fun findBackStackAliasNames(
+        files: List<KtFile>,
+        warnings: MutableList<String>,
+    ): Set<String> {
+        val constructorCalls = files
+            .flatMap { file -> PsiTreeUtil.findChildrenOfType(file, KtCallExpression::class.java) }
+            .filter { it.calleeSimpleNameOrNull() == "NavBackStack" }
+
+        if (constructorCalls.isEmpty()) return emptySet()
+        if (constructorCalls.size > 1) {
+            warnings += "found ${constructorCalls.size} separate NavBackStack<NavKey>() construction sites " +
+                "(at ${constructorCalls.joinToString(", ") { it.location() }}); only a single, app-wide " +
+                "shared NavBackStack instance is supported — dropping all NavBackStack-mutation-based nav edges"
+            return emptySet()
+        }
+
+        val aliasNames = mutableSetOf<String>()
+        val rootProperty = PsiTreeUtil.getParentOfType(constructorCalls.single(), KtProperty::class.java)
+        if (rootProperty?.name != null) {
+            aliasNames += rootProperty.name!!
+        } else {
+            warnings += "found a NavBackStack<NavKey>() construction that isn't bound to a named val/property " +
+                "at ${constructorCalls.single().location()}; nav edges via NavBackStack mutation starting from " +
+                "it cannot be traced"
+        }
+
+        files.flatMap { file -> PsiTreeUtil.findChildrenOfType(file, KtParameter::class.java) }
+            .filter { it.typeReference?.declaredSimpleTypeNameOrNull() == "NavBackStack" }
+            .mapNotNullTo(aliasNames) { it.name }
+
+        return aliasNames
+    }
+
     private fun KtCallExpression.entryRegistrationLambda(): KtLambdaExpression? =
         lambdaArguments.firstOrNull()?.getLambdaExpression()
-
-    private fun KtCallExpression.calleeSimpleNameOrNull(): String? =
-        (calleeExpression as? KtNameReferenceExpression)?.getReferencedName()
 }
+
+/** [KtCallExpression.getCalleeExpression]'s referenced name, if it's a plain (unqualified) reference. */
+private fun KtCallExpression.calleeSimpleNameOrNull(): String? =
+    (calleeExpression as? KtNameReferenceExpression)?.getReferencedName()
 
 /** Resolves a simple callee name to a specific [KtNamedFunction], or drops it (with a warning) if ambiguous. */
 private class CalleeResolver(
@@ -302,12 +414,21 @@ private fun KtTypeReference.declaredSimpleTypeNameOrNull(): String? {
     return (typeElement as? KtUserType)?.referencedName
 }
 
-/** One BFS step: a PSI subtree to scan, at what depth, with which function-typed parameter names are live. */
+/** [KtCallExpression] method names on a tracked `NavBackStack` alias treated as a terminal navigate edge. */
+private val BACKSTACK_MUTATION_METHOD_NAMES = setOf("add", "addAll")
+
+/**
+ * One BFS step: a PSI subtree to scan, at what depth, with which function-typed parameter names
+ * are live, and (see the class kdoc's "Route-carrying closures" section) a best-effort
+ * name→expression substitution map for a route-carrying closure's own parameter(s), if this
+ * context is the body of one.
+ */
 private data class SearchContext(
     val root: KtExpression,
     val depth: Int,
     val liveParams: Set<String>,
     val owningFunction: KtNamedFunction?,
+    val substitutions: Map<String, KtExpression> = emptyMap(),
 )
 
 /**
@@ -318,8 +439,7 @@ private data class SearchContext(
  */
 private class CallGraphTraversal(
     private val sourceRoute: String,
-    private val navigateCallNames: Set<String>,
-    private val routeSimpleNames: Set<String>,
+    private val backStackAliasNames: Set<String>,
     private val routesByQualifiedName: Map<String, NavNode>,
     private val resolver: CalleeResolver,
     private val maxDepth: Int,
@@ -328,7 +448,15 @@ private class CallGraphTraversal(
     private val ownEntryRegistrationLambda: KtLambdaExpression?,
     private val warnings: MutableList<String>,
 ) {
-    private val visited = HashSet<KtExpression>()
+    // Keyed on (root, substitutions), not just root: the same PSI subtree is legitimately reached
+    // more than once with *different* route substitutions whenever more than one call site invokes
+    // the same route-carrying closure with a different route (e.g. 4 separate
+    // `navigateTo(SomeRoute)` calls all bottoming out at the same shared `{ key ->
+    // backStack.add(key) }` closure body) - deduping on root alone would silently keep only
+    // whichever one happened to be enqueued first. Still bounded (so BFS still terminates in the
+    // presence of cycles): substitutions maps are built once per landing lambda/function from a
+    // finite set of PSI expressions, so (root, substitutions) still ranges over a finite space.
+    private val visited = HashSet<Pair<KtExpression, Map<String, KtExpression>>>()
 
     fun run(
         rootBody: KtExpression,
@@ -339,7 +467,7 @@ private class CallGraphTraversal(
         queue.add(SearchContext(rootBody, 0, owningFunction?.functionTypedParamNames().orEmpty(), owningFunction))
         while (queue.isNotEmpty()) {
             val context = queue.removeFirst()
-            if (!visited.add(context.root)) continue
+            if (!visited.add(context.root to context.substitutions)) continue
             edges += processContext(context, queue)
         }
         return edges
@@ -355,21 +483,133 @@ private class CallGraphTraversal(
             val enclosingCall = ref.parent as? KtCallExpression
             val isCallee = enclosingCall?.calleeExpression === ref
             when {
-                isCallee && name in navigateCallNames -> handleNavigateCall(enclosingCall, edges)
+                isCallee && isBackStackMutationCall(name, enclosingCall) ->
+                    handleBackStackMutationCall(enclosingCall, name, context.substitutions, edges)
                 context.owningFunction != null && name in context.liveParams -> {
-                    if (isCallee) {
-                        handleTypedParameterInvocation(name, context.owningFunction, enclosingCall, edges)
+                    val callArguments = if (isCallee) {
+                        enclosingCall.callArgumentExpressions()
+                            .map { it.resolvedThroughSubstitutions(context.substitutions) }
+                    } else {
+                        null
                     }
-                    expandParameterInvocation(name, context.owningFunction, context.depth, queue)
+                    expandParameterInvocation(name, context.owningFunction, context.depth, queue, callArguments)
                 }
                 isCallee -> {
-                    val target = resolver.resolveFunction(name, ref.containingKtFile, ref) ?: return@forEach
-                    enqueueFunctionBody(target, context.depth, queue)
+                    val callArguments = enclosingCall.callArgumentExpressions()
+                        .map { it.resolvedThroughSubstitutions(context.substitutions) }
+                    val owner = context.owningFunction
+                    val resolvedLocally = owner != null &&
+                        resolveLocalCallbackReference(name, owner, context.depth, queue, callArguments)
+                    if (!resolvedLocally) {
+                        val target = resolver.resolveFunction(name, ref.containingKtFile, ref) ?: return@forEach
+                        enqueueFunctionBody(target, context.depth, queue)
+                    }
                 }
                 else -> Unit
             }
         }
         return edges
+    }
+
+    /**
+     * True if [call] — a call to [methodName] — is written as `<receiver>.methodName(...)` with a
+     * bare-name receiver whose name is one of [backStackAliasNames]. This is checked structurally
+     * (never a bare name check on `methodName` alone, which would false-positive on every unrelated
+     * `.add(...)`/`.addAll(...)` call in the codebase — `add` is a far more generic method name
+     * than `navigateTo` ever was) by walking from [call] up to its enclosing
+     * [KtDotQualifiedExpression] and confirming [call] is that expression's own selector (not, for
+     * instance, itself a receiver further down a longer chain).
+     */
+    private fun isBackStackMutationCall(
+        methodName: String,
+        call: KtCallExpression,
+    ): Boolean {
+        if (methodName !in BACKSTACK_MUTATION_METHOD_NAMES) return false
+        val dotQualified = call.parent as? KtDotQualifiedExpression ?: return false
+        if (dotQualified.selectorExpression !== call) return false
+        val receiver = dotQualified.receiverExpression as? KtNameReferenceExpression ?: return false
+        return receiver.getReferencedName() in backStackAliasNames
+    }
+
+    private fun handleBackStackMutationCall(
+        call: KtCallExpression,
+        methodName: String,
+        substitutions: Map<String, KtExpression>,
+        edges: MutableList<NavEdge>,
+    ) {
+        val routeExpressions = resolveMutationRouteArguments(call, methodName) ?: return
+        routeExpressions.forEach { resolveRouteArgumentAndEmitEdge(it, substitutions, edges) }
+    }
+
+    /**
+     * The route-argument expression(s) [call] — a call to [methodName], already confirmed by
+     * [isBackStackMutationCall] to be a mutation of the tracked `NavBackStack` — supplies, or
+     * `null` if [call]'s own shape can't be made sense of (dropped with a warning, not guessed):
+     * - `add(element)`: the single argument.
+     * - `add(index, element)`: the named `element` argument if present, else (two positional
+     *   arguments) the last one.
+     * - `addAll(elements)` / `addAll(index, elements)`: the collection argument (the only argument,
+     *   or the last of two) must itself be a call-shaped collection literal (e.g.
+     *   `listOf(RouteA, RouteB)`) to be unwrapped into its own individual route arguments — a
+     *   collection built any other way (e.g. a plain variable reference) can't be enumerated
+     *   syntactically, so is dropped with a warning rather than guessed at.
+     */
+    private fun resolveMutationRouteArguments(
+        call: KtCallExpression,
+        methodName: String,
+    ): List<KtExpression>? {
+        val args: List<ValueArgument> = call.valueArguments
+        return when (methodName) {
+            "add" -> when (args.size) {
+                1 -> listOfNotNull(args[0].getArgumentExpression())
+                2 -> {
+                    val named = args.firstOrNull {
+                        it.isNamed() && it.getArgumentName()?.asName?.asString() == "element"
+                    }
+                    listOfNotNull((named ?: args.last()).getArgumentExpression())
+                }
+                else -> null
+            }
+            "addAll" -> {
+                val collectionArg = when (args.size) {
+                    1 -> args[0]
+                    2 -> args.last()
+                    else -> null
+                } ?: return null
+                val collectionExpr = collectionArg.getArgumentExpression() ?: return null
+                unwrapCollectionLiteralOrNull(collectionExpr) ?: run {
+                    warnings += "could not resolve the collection argument to addAll(...) as a recognizable " +
+                        "collection literal at ${call.location()}; nav edges via this call are dropped"
+                    null
+                }
+            }
+            else -> null
+        }
+    }
+
+    private fun unwrapCollectionLiteralOrNull(expression: KtExpression): List<KtExpression>? =
+        (expression as? KtCallExpression)?.valueArguments?.mapNotNull { it.getArgumentExpression() }
+
+    /**
+     * Resolves [routeExpression] (a mutation call's route argument) to a target route and, on a
+     * hit, emits the edge. [substitutions] is checked first (see the class kdoc's "Route-carrying
+     * closures" section): if [routeExpression] is itself a bare reference to a route-carrying
+     * closure's own parameter, the expression actually passed at the invocation that led here is
+     * used instead of the parameter name itself (which could never resolve to a real route). Falls
+     * back to resolving [routeExpression] exactly as written when it isn't a substituted name (the
+     * common case: a literal route reference written directly as the mutation call's argument).
+     */
+    private fun resolveRouteArgumentAndEmitEdge(
+        routeExpression: KtExpression,
+        substitutions: Map<String, KtExpression>,
+        edges: MutableList<NavEdge>,
+    ) {
+        val resolvedExpression = routeExpression.resolvedThroughSubstitutions(substitutions)
+        val chain = resolvedExpression.routeReferenceChainOrNull() ?: return
+        val target = resolveQualifiedTarget(chain, resolvedExpression)
+        if (target != null) {
+            edges += NavEdge(sourceRoute, target.qualifiedName)
+        }
     }
 
     private fun enqueueFunctionBody(
@@ -417,12 +657,12 @@ private class CallGraphTraversal(
      * lives inside some unrelated aggregator route's own registration, whose `content` argument is a
      * lambda (or, equally, a callable reference — see [resolveBoundExpression]'s
      * `KtCallableReferenceExpression` branch, which passes the reference expression itself, not its
-     * resolved target's body) holding that aggregator's own, entirely real `navigateTo(...)` calls.
-     * Scanning that argument here would misattribute the aggregator's own edges to whatever route's
-     * search happened to reach the shared wrapper - checked by walking up [expression]'s PSI
-     * ancestors rather than requiring exact identity, since the leaking argument is typically nested
-     * several calls deep inside the other registration's trailing lambda (as in the Scaffold example
-     * above), not necessarily written as its immediate body. Deliberately takes the *bound argument
+     * resolved target's body) holding that aggregator's own, entirely real mutation calls. Scanning
+     * that argument here would misattribute the aggregator's own edges to whatever route's search
+     * happened to reach the shared wrapper - checked by walking up [expression]'s PSI ancestors
+     * rather than requiring exact identity, since the leaking argument is typically nested several
+     * calls deep inside the other registration's trailing lambda (as in the Scaffold example above),
+     * not necessarily written as its immediate body. Deliberately takes the *bound argument
      * expression itself* (as written at its call site), never the callable reference's resolved
      * target — an ordinary named function reached this way (e.g. `RouteBTopContent` in the example
      * above) is not itself nested inside anything and would never trip this check if it were passed
@@ -450,6 +690,7 @@ private class CallGraphTraversal(
         owningFunction: KtNamedFunction,
         foundAtDepth: Int,
         queue: ArrayDeque<SearchContext>,
+        callArguments: List<KtExpression>?,
     ) {
         val newDepth = foundAtDepth + 1
         if (newDepth > maxDepth) {
@@ -460,21 +701,80 @@ private class CallGraphTraversal(
         val callSites = resolver.findCallSites(owningFunction)
         callSites.forEach { callSite ->
             val boundExpression = boundArgumentExpression(callSite, owningFunction, paramName) ?: return@forEach
-            resolveBoundExpression(boundExpression, newDepth, queue)
+            resolveBoundExpression(boundExpression, newDepth, queue, callArguments)
         }
     }
 
+    /**
+     * Best-effort local-`val`-closure resolution (class kdoc's case 3): if [owner]'s own body
+     * declares a local property named [name] with an initializer, that initializer is treated as
+     * "one more BFS hop out" (same [maxDepth] bound/warning shape as [expandParameterInvocation])
+     * and the search continues from it via [resolveBoundExpression] — reusing its
+     * `KtLambdaExpression`/`KtCallableReferenceExpression` handling (leak guards included) rather
+     * than duplicating it. [callArguments], if [name] is itself being invoked here with concrete
+     * arguments, is threaded through unchanged so it can be bound once a lambda/function is
+     * actually found (see the class kdoc's "Route-carrying closures" section).
+     *
+     * Returns `true` the instant a local property named [name] is found at all — even when the
+     * depth bound stops the search from actually continuing through it — so callers never also try
+     * resolving [name] some other way (e.g. as an outer parameter or a top-level function): a local
+     * declaration shadows any identically-named outer binding in real Kotlin scoping, so once one
+     * is found under this name, that's the whole story for this name at this point in the code,
+     * whether or not the search can actually continue through it.
+     *
+     * Deliberately a flat name search over [owner]'s whole body with no real scoping/shadowing
+     * model (same "best effort, syntactic only" philosophy as the rest of this class) — e.g. two
+     * local vals with the same name in different nested blocks aren't disambiguated.
+     */
+    private fun resolveLocalCallbackReference(
+        name: String,
+        owner: KtNamedFunction,
+        foundAtDepth: Int,
+        queue: ArrayDeque<SearchContext>,
+        callArguments: List<KtExpression>?,
+    ): Boolean {
+        val initializer = resolveLocalCallbackInitializer(name, owner) ?: return false
+        val newDepth = foundAtDepth + 1
+        if (newDepth > maxDepth) {
+            warnings += "nav edge candidate unresolved beyond depth $maxDepth from route \"$sourceRoute\" " +
+                "resolving local callback \"$name\" declared in ${owner.location()}"
+            return true
+        }
+        resolveBoundExpression(initializer, newDepth, queue, callArguments)
+        return true
+    }
+
+    /**
+     * [callArguments], when non-null, is what a specific invocation of the callback this bound
+     * expression ultimately represents was actually called with — carried through unchanged from
+     * wherever this resolution started (either [expandParameterInvocation] or
+     * [resolveLocalCallbackReference]) until a real lambda/function is found below, at which point
+     * it's bound, positionally, to that lambda's/function's own declared parameters and becomes the
+     * new [SearchContext]'s `substitutions` (see the class kdoc's "Route-carrying closures"
+     * section). `null` for an ordinary `() -> Unit`-shaped callback pass-through, where there is
+     * nothing to bind.
+     */
     private fun resolveBoundExpression(
         expression: KtExpression,
         depth: Int,
         queue: ArrayDeque<SearchContext>,
+        callArguments: List<KtExpression>? = null,
     ) {
         when (expression) {
             is KtLambdaExpression -> {
                 if (blockedAsAnotherRoutesEntryRegistration(expression)) return
                 val body = expression.bodyExpression ?: return
                 val closureOwner = PsiTreeUtil.getParentOfType(expression, KtNamedFunction::class.java)
-                queue.add(SearchContext(body, depth, closureOwner?.functionTypedParamNames().orEmpty(), closureOwner))
+                val substitutions = bindArguments(expression.valueParameters.mapNotNull { it.name }, callArguments)
+                queue.add(
+                    SearchContext(
+                        body,
+                        depth,
+                        closureOwner?.functionTypedParamNames().orEmpty(),
+                        closureOwner,
+                        substitutions,
+                    ),
+                )
             }
             is KtCallableReferenceExpression -> {
                 // Checked against the reference expression itself (as written at its call site),
@@ -488,20 +788,28 @@ private class CallGraphTraversal(
                 val target = resolver.resolveFunction(refName, expression.containingKtFile, expression) ?: return
                 if (blockedAsEntryHostingFunction(target)) return
                 val body = target.searchableBody() ?: return
-                queue.add(SearchContext(body, depth, target.functionTypedParamNames(), target))
+                val substitutions = bindArguments(target.valueParameters.mapNotNull { it.name }, callArguments)
+                queue.add(SearchContext(body, depth, target.functionTypedParamNames(), target, substitutions))
             }
             is KtNameReferenceExpression -> {
-                // A pass-through: the bound argument is itself just a reference to a function-typed
-                // parameter of whatever function this call site lives in (e.g. a wiring function
-                // that forwards its own callback parameter one level further up under the same
-                // shape). Keep unwinding one hop at a time until we hit a real lambda/callable ref.
+                // A pass-through: the bound argument is itself just a reference to a callback the
+                // enclosing function/lambda has access to — either a function-typed parameter it
+                // was itself given (a wiring function forwarding its own callback parameter one
+                // level further up under the same shape), or a local val declared in its own body.
+                // Local resolution is tried first: it would shadow the parameter case in real
+                // Kotlin scoping anyway (see resolveLocalCallbackReference's kdoc). Keep unwinding
+                // one hop at a time until a real lambda/callable reference is found.
                 val enclosingFunction = PsiTreeUtil.getParentOfType(expression, KtNamedFunction::class.java)
                 val refName = expression.getReferencedName()
-                if (enclosingFunction != null && refName in enclosingFunction.functionTypedParamNames()) {
-                    expandParameterInvocation(refName, enclosingFunction, depth, queue)
-                } else {
-                    warnings += "could not resolve bound argument \"$refName\" for a navigate-relevant " +
-                        "parameter at ${expression.location()}"
+                when {
+                    enclosingFunction != null &&
+                        resolveLocalCallbackReference(refName, enclosingFunction, depth, queue, callArguments) -> Unit
+                    enclosingFunction != null && refName in enclosingFunction.functionTypedParamNames() ->
+                        expandParameterInvocation(refName, enclosingFunction, depth, queue, callArguments)
+                    else -> {
+                        warnings += "could not resolve bound argument \"$refName\" for a navigate-relevant " +
+                            "parameter at ${expression.location()}"
+                    }
                 }
             }
             else -> {
@@ -511,36 +819,12 @@ private class CallGraphTraversal(
         }
     }
 
-    /**
-     * Checks [call] — an invocation of the live function-typed parameter [paramName] of
-     * [owningFunction] — against its declared type: if that type's parameter list has a type
-     * whose simple name is `NavKey` or a known route, treats [call] as a terminal navigate edge
-     * (same argument resolution as [handleNavigateCall]). A no-op if the parameter has no explicit
-     * function-type annotation, or that type doesn't mention a route-shaped parameter.
-     */
-    private fun handleTypedParameterInvocation(
-        paramName: String,
-        owningFunction: KtNamedFunction,
-        call: KtCallExpression,
-        edges: MutableList<NavEdge>,
-    ) {
-        val parameter = owningFunction.valueParameters.firstOrNull { it.name == paramName } ?: return
-        val functionType = parameter.declaredFunctionTypeOrNull() ?: return
-        val paramTypeNames = functionType.parameters.mapNotNull { it.typeReference?.declaredSimpleTypeNameOrNull() }
-        val isRouteShaped = paramTypeNames.any { it == "NavKey" || it in routeSimpleNames }
-        if (isRouteShaped) handleNavigateCall(call, edges)
-    }
-
-    private fun handleNavigateCall(
-        call: KtCallExpression,
-        edges: MutableList<NavEdge>,
-    ) {
-        val chain = call.firstArgumentRouteChainOrNull() ?: return
-        val target = resolveQualifiedTarget(chain, call)
-        if (target != null) {
-            edges += NavEdge(sourceRoute, target.qualifiedName)
-        }
-    }
+    /** Positionally binds [paramNames] to [callArguments], or an empty map if either is absent/empty. */
+    private fun bindArguments(
+        paramNames: List<String>,
+        callArguments: List<KtExpression>?,
+    ): Map<String, KtExpression> =
+        callArguments?.let { args -> paramNames.zip(args).toMap() }.orEmpty()
 
     /**
      * Resolves [chain] (e.g. `["TodoRoute", "Detail"]` for a written qualifier, or just `["Detail"]`
@@ -551,11 +835,15 @@ private class CallGraphTraversal(
      * differently-nested route also ending in `.TodoRoute.Detail`.
      *
      * The chain's root identifier (its first segment, or its only segment for a single-segment
-     * chain) is resolved to its own real qualified name first: an import in [call]'s containing
-     * file whose fully-qualified name's last segment equals the root identifier wins if one exists;
-     * otherwise the root is assumed to resolve within the call site's own file package, since
-     * Kotlin doesn't require an import for a same-package reference. The rest of the written chain,
-     * if any, is appended onto that resolved name and looked up exactly.
+     * chain) is resolved to its own real qualified name first: an import in [routeExpression]'s
+     * containing file whose fully-qualified name's last segment equals the root identifier wins if
+     * one exists; otherwise the root is assumed to resolve within that file's own package, since
+     * Kotlin doesn't require an import for a same-package reference. [routeExpression]'s own file is
+     * used (not the mutation call's) so a route argument resolved through a substitution (see the
+     * class kdoc's "Route-carrying closures" section) is resolved against the imports of wherever it
+     * was actually *written*, not wherever the mutation call it ended up bound to happens to live.
+     * The rest of the written chain, if any, is appended onto the resolved root name and looked up
+     * exactly.
      *
      * This covers every legally-referenceable route with no separate fast path needed: a bare
      * simple-name reference is only valid Kotlin at all when the referenced declaration is either
@@ -572,13 +860,13 @@ private class CallGraphTraversal(
      */
     private fun resolveQualifiedTarget(
         chain: List<String>,
-        call: KtCallExpression,
+        routeExpression: KtExpression,
     ): NavNode? {
-        val rootFqn = resolveRootFqn(chain.first(), call.containingKtFile)
+        val rootFqn = resolveRootFqn(chain.first(), routeExpression.containingKtFile)
         val candidateFqn = if (chain.size > 1) "$rootFqn.${chain.drop(1).joinToString(".")}" else rootFqn
         val target = routesByQualifiedName[candidateFqn]
         if (target == null) {
-            warnings += "ambiguous navigate target route \"${chain.joinToString(".")}\" at ${call.location()}"
+            warnings += "ambiguous navigate target route \"${chain.joinToString(".")}\" at ${routeExpression.location()}"
         }
         return target
     }
@@ -621,8 +909,38 @@ private fun boundArgumentExpression(
     return null
 }
 
-private fun KtCallExpression.firstArgumentRouteChainOrNull(): List<String>? =
-    valueArguments.firstOrNull()?.getArgumentExpression()?.routeReferenceChainOrNull()
+/** [KtCallExpression.getValueArguments]' own argument expressions, in written order. */
+private fun KtCallExpression.callArgumentExpressions(): List<KtExpression> =
+    valueArguments.mapNotNull { it.getArgumentExpression() }
+
+/**
+ * [this] resolved one level through [substitutions] (see the class kdoc's "Route-carrying
+ * closures" section): if [this] is itself a bare reference to a name bound in [substitutions] -
+ * i.e. a route-carrying closure's own parameter, referenced by name inside that closure's body -
+ * the expression actually bound to it is returned instead of the parameter-name reference itself
+ * (which could never resolve to a real route on its own). Returns [this] unchanged otherwise (the
+ * common case: a literal expression, or a name that isn't a substituted parameter).
+ *
+ * Called at every point a call's argument expressions are captured for the *next* hop - not just
+ * at the final mutation-call argument - so that a chain of two or more nested route-carrying
+ * closures (e.g. `{ x -> navigateTo(x) }` itself invoked from inside another closure's body)
+ * resolves through each layer in turn rather than only the innermost one: each hop applies its own
+ * *current* substitutions to the arguments it's about to hand off, so by the time a name reaches
+ * the next closure it already denotes whatever was actually, concretely passed further up the
+ * chain - not the immediately-enclosing closure's own parameter name, which is meaningless one
+ * layer removed from it.
+ */
+private fun KtExpression.resolvedThroughSubstitutions(substitutions: Map<String, KtExpression>): KtExpression =
+    (this as? KtNameReferenceExpression)?.let { substitutions[it.getReferencedName()] } ?: this
+
+/** A local property in [owner]'s body named [name] with an initializer, if any. */
+private fun resolveLocalCallbackInitializer(
+    name: String,
+    owner: KtNamedFunction,
+): KtExpression? =
+    PsiTreeUtil.findChildrenOfType(owner, KtProperty::class.java)
+        .firstOrNull { it.name == name }
+        ?.initializer
 
 /**
  * The route argument's own dotted reference chain, outermost-to-innermost (e.g.
