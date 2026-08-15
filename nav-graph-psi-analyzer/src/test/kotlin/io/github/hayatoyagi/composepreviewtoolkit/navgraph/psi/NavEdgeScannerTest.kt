@@ -441,6 +441,98 @@ class NavEdgeScannerTest {
     }
 
     @Test
+    fun `a navigate call qualified with its parent route disambiguates between sealed-hierarchy siblings sharing a leaf name`() {
+        // TodoRoute.Detail and NoteRoute.Detail are two different sealed-hierarchy siblings that
+        // happen to share the leaf simple name "Detail" (see NavNode's own kdoc for this exact
+        // shape). navigateTo(TodoRoute.Detail) carries enough information in its own qualifier to
+        // pick the right one without guessing.
+        val file = parser.parse(
+            "SiblingRoutes.kt",
+            """
+            package com.example.siblings
+
+            import androidx.navigation3.runtime.NavKey
+            import androidx.navigation3.runtime.entry
+
+            sealed interface TodoRoute : NavKey {
+                object Detail : TodoRoute
+            }
+
+            sealed interface NoteRoute : NavKey {
+                object Detail : NoteRoute
+            }
+
+            object ListRoute : NavKey
+
+            fun registerSiblings() {
+                entry<ListRoute> { navigateTo(TodoRoute.Detail) }
+                entry<TodoRoute.Detail> { TodoDetailScreen() }
+                entry<NoteRoute.Detail> { NoteDetailScreen() }
+            }
+
+            fun TodoDetailScreen() = Unit
+            fun NoteDetailScreen() = Unit
+            fun navigateTo(route: NavKey) = Unit
+            """.trimIndent(),
+        )
+
+        val result = NavEdgeScanner().scan(listOf(file))
+
+        assertEquals(
+            listOf(NavEdge("com.example.siblings.ListRoute", "com.example.siblings.TodoRoute.Detail")),
+            result.edges,
+        )
+        assertTrue(
+            result.warnings.none { it.contains("ambiguous", ignoreCase = true) },
+            "expected no ambiguity warning but got: ${result.warnings}",
+        )
+    }
+
+    @Test
+    fun `a bare unqualified reference matching multiple sibling leaf names is still dropped with a warning`() {
+        // Same sibling shape as above, but the navigate call omits the qualifier entirely, so
+        // there's genuinely nothing in the source to disambiguate with - this must still warn
+        // rather than guess.
+        val file = parser.parse(
+            "BareSiblingRoutes.kt",
+            """
+            package com.example.baresiblings
+
+            import androidx.navigation3.runtime.NavKey
+            import androidx.navigation3.runtime.entry
+
+            sealed interface TodoRoute : NavKey {
+                object Detail : TodoRoute
+            }
+
+            sealed interface NoteRoute : NavKey {
+                object Detail : NoteRoute
+            }
+
+            object ListRoute : NavKey
+
+            fun registerBareSiblings() {
+                entry<ListRoute> { navigateTo(Detail) }
+                entry<TodoRoute.Detail> { TodoDetailScreen() }
+                entry<NoteRoute.Detail> { NoteDetailScreen() }
+            }
+
+            fun TodoDetailScreen() = Unit
+            fun NoteDetailScreen() = Unit
+            fun navigateTo(route: NavKey) = Unit
+            """.trimIndent(),
+        )
+
+        val result = NavEdgeScanner().scan(listOf(file))
+
+        assertTrue(result.edges.isEmpty(), "expected no edges but found: ${result.edges}")
+        assertTrue(
+            result.warnings.any { it.contains("ambiguous", ignoreCase = true) && it.contains("Detail") },
+            "expected an ambiguous-target warning but got: ${result.warnings}",
+        )
+    }
+
+    @Test
     fun `a callback relying purely on type inference, with no explicit annotation, is not found - known limitation`() {
         // Matches the documented gap: a local val lambda with an untyped parameter is invisible to
         // this purely-syntactic scanner regardless of naming, since it isn't even tracked as a live

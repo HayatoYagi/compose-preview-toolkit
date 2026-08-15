@@ -49,9 +49,15 @@ data class NavEdgeScanResult(
  * Within a context's subtree, every name reference is classified once, in priority order:
  *
  * 1. **Navigate call by name**: the reference is a call's callee and its simple name is in
- *    [navigateCallNames] → inspect the call's first argument; if it matches a known route by
- *    simple name (a bare object reference or a constructor call), emit an edge. Terminal — not
- *    traversed further.
+ *    [navigateCallNames] → inspect the call's first argument, read as its own dotted reference
+ *    chain (e.g. `["TodoRoute", "Detail"]` for a qualified reference/constructor call
+ *    `TodoRoute.Detail`, or just `["Detail"]` for a bare one), and match it against known routes
+ *    by leaf simple name. A unique match emits an edge. When more than one known route shares that
+ *    leaf name (e.g. `TodoRoute.Detail` and `NoteRoute.Detail`, two sealed-hierarchy siblings), the
+ *    chain's own qualifier - if the call site wrote one - is used to narrow to the route whose
+ *    qualified name ends with that same dotted tail, without needing type resolution; if that
+ *    still leaves more than one candidate, or the reference was unqualified to begin with, the
+ *    call is dropped with a warning rather than guessed. Terminal — not traversed further.
  * 2. **Parameter reference**: the reference's simple name matches a function-typed parameter that
  *    is live in the current context — *regardless* of whether the reference is itself a call's
  *    callee (`onClick()`) or merely passed along as a value to some other call
@@ -388,20 +394,52 @@ private class CallGraphTraversal(
         call: KtCallExpression,
         edges: MutableList<NavEdge>,
     ) {
-        val targetSimpleName = call.firstArgumentRouteSimpleName() ?: return
+        val chain = call.firstArgumentRouteChainOrNull() ?: return
+        val targetSimpleName = chain.last()
         val candidates = routesBySimpleName[targetSimpleName].orEmpty()
         val target = when {
             candidates.isEmpty() -> null
             candidates.size == 1 -> candidates.single()
-            else -> {
-                warnings += "ambiguous navigate target route \"$targetSimpleName\" " +
-                    "(${candidates.size} candidates) at ${call.location()}"
-                null
-            }
+            else -> resolveAmbiguousTarget(chain, targetSimpleName, candidates, call)
         }
         if (target != null) {
             edges += NavEdge(sourceRoute, target.qualifiedName)
         }
+    }
+
+    /**
+     * [candidates] all share [targetSimpleName] as their leaf simple name, so a bare-name match
+     * can't tell them apart. If the call site wrote a qualifier (`chain` has more than one
+     * segment, e.g. `["TodoRoute", "Detail"]`), prefer narrowing to candidates whose
+     * [NavNode.qualifiedName] ends with that same dotted tail before falling back to the
+     * unqualified "give up" warning - this is enough to disambiguate sealed-hierarchy siblings
+     * that share a leaf name (e.g. `TodoRoute.Detail` vs. `NoteRoute.Detail`) without needing type
+     * resolution. Still warns rather than guesses when even the qualified tail remains ambiguous
+     * (e.g. the same qualifier used in two different packages) or when there was no qualifier to
+     * begin with.
+     */
+    private fun resolveAmbiguousTarget(
+        chain: List<String>,
+        targetSimpleName: String,
+        candidates: List<NavNode>,
+        call: KtCallExpression,
+    ): NavNode? {
+        if (chain.size > 1) {
+            val qualifiedTail = chain.joinToString(".")
+            val matches = candidates.filter { it.qualifiedName.endsWith(".$qualifiedTail") || it.qualifiedName == qualifiedTail }
+            when (matches.size) {
+                1 -> return matches.single()
+                0 -> Unit // qualifier matched nothing; fall through to the unqualified warning below
+                else -> {
+                    warnings += "ambiguous navigate target route \"$qualifiedTail\" " +
+                        "(${matches.size} candidates) at ${call.location()}"
+                    return null
+                }
+            }
+        }
+        warnings += "ambiguous navigate target route \"$targetSimpleName\" " +
+            "(${candidates.size} candidates) at ${call.location()}"
+        return null
     }
 }
 
@@ -428,13 +466,29 @@ private fun boundArgumentExpression(
     return null
 }
 
-private fun KtCallExpression.firstArgumentRouteSimpleName(): String? =
-    valueArguments.firstOrNull()?.getArgumentExpression()?.routeSimpleNameOrNull()
+private fun KtCallExpression.firstArgumentRouteChainOrNull(): List<String>? =
+    valueArguments.firstOrNull()?.getArgumentExpression()?.routeReferenceChainOrNull()
 
-private fun KtExpression.routeSimpleNameOrNull(): String? = when (this) {
-    is KtCallExpression -> (calleeExpression as? KtNameReferenceExpression)?.getReferencedName()
-    is KtNameReferenceExpression -> getReferencedName()
-    is KtDotQualifiedExpression -> selectorExpression?.routeSimpleNameOrNull()
+/**
+ * The route argument's own dotted reference chain, outermost-to-innermost (e.g.
+ * `["TodoRoute", "Detail"]` for a qualified reference/constructor call `TodoRoute.Detail`, or just
+ * `["Detail"]` for a bare one) - unlike a bare simple name, this preserves whatever qualifier the
+ * call site actually wrote, so a candidate route can be matched against it (see
+ * [CallGraphTraversal.resolveAmbiguousTarget]). Returns `null` when the argument isn't a
+ * recognized route-shaped expression at all (an unresolvable navigate call, same as before).
+ */
+private fun KtExpression.routeReferenceChainOrNull(): List<String>? = when (this) {
+    is KtCallExpression -> (calleeExpression as? KtNameReferenceExpression)?.getReferencedName()?.let { listOf(it) }
+    is KtNameReferenceExpression -> listOf(getReferencedName())
+    is KtDotQualifiedExpression -> {
+        val receiverChain = receiverExpression.routeReferenceChainOrNull()
+        val selectorName = when (val selector = selectorExpression) {
+            is KtNameReferenceExpression -> selector.getReferencedName()
+            is KtCallExpression -> (selector.calleeExpression as? KtNameReferenceExpression)?.getReferencedName()
+            else -> null
+        }
+        if (receiverChain != null && selectorName != null) receiverChain + selectorName else null
+    }
     else -> null
 }
 
