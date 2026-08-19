@@ -28,12 +28,18 @@ jobs:
       - name: Create and push tag if missing
         id: tag
         run: |
-          tag="v${{ steps.version.outputs.version }}"
+          version="${{ steps.version.outputs.version }}"
+          tag="v$version"
           if git rev-parse "$tag" >/dev/null 2>&1; then
             echo "created=false" >> "$GITHUB_OUTPUT"
           else
             git tag "$tag"
             git push origin "$tag"
+            if [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              major_tag="v${version%%.*}"
+              git tag -f "$major_tag"
+              git push -f origin "$major_tag"
+            fi
             echo "created=true" >> "$GITHUB_OUTPUT"
           fi
 
