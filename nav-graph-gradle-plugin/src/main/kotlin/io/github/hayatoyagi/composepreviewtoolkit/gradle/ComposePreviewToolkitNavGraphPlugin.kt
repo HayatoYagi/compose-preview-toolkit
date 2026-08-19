@@ -94,9 +94,10 @@ class ComposePreviewToolkitNavGraphPlugin : Plugin<Project> {
                     }
                 },
             )
-            // Unlike edgeSourceFiles/screenshotReferenceImages above, this can't be migrated to
-            // Project.isolated — IsolatedProject exposes projectDirectory but not buildDirectory.
-            // Still Isolated-Projects-incompatible; see HayatoYagi/compose-preview-toolkit#57.
+            // Unlike edgeSourceFiles/screenshotReferenceImages's projectDirectory reads, this can't
+            // be migrated to Project.isolated — IsolatedProject exposes projectDirectory but not
+            // buildDirectory. Still Isolated-Projects-incompatible; see
+            // HayatoYagi/compose-preview-toolkit#57.
             task.screenshotIndexFiles.from(
                 Callable {
                     graphModules.map { path ->
@@ -124,8 +125,9 @@ class ComposePreviewToolkitNavGraphPlugin : Plugin<Project> {
                 Callable {
                     graphModules.mapNotNull { path ->
                         val graphModuleProject = target.project(path)
-                        graphModuleProject.tasks.findByName("kspDebugKotlin")
-                            .takeIf { graphModuleProject.pluginManager.findPlugin(SCREENSHOT_PLUGIN_ID) != null }
+                        graphModuleProject
+                            .takeIf { it.pluginManager.findPlugin(SCREENSHOT_PLUGIN_ID) != null }
+                            ?.tasks?.findByName("kspDebugKotlin")
                     }
                 },
             )
