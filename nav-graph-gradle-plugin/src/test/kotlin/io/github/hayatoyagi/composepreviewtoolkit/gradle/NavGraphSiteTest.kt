@@ -444,6 +444,22 @@ class NavGraphSiteTest {
     }
 
     @Test
+    fun `buildGallerySiteHtml HTML-escapes a branch name so it can't break out of the code tag or inject markup`() {
+        val buildInfo = SiteBuildInfo(
+            commitSha = "abc1234567890",
+            githubRepository = "HayatoYagi/compose-preview-toolkit",
+            // Git branch names may legally contain '"', '<', '>', unlike a commit SHA's fixed
+            // hex-digit alphabet — a malicious fork's PR branch could otherwise inject markup here.
+            branchName = "feature/\"><script>alert(1)</script>",
+        )
+
+        val html = buildGallerySiteHtml(emptyList(), mermaidGraph = "graph TD;\n", buildInfo = buildInfo)
+
+        assertFalse(html.contains("<script>alert(1)</script>"))
+        assertTrue(html.contains("on branch <code>feature/&quot;&gt;&lt;script&gt;alert(1)&lt;/script&gt;</code>"))
+    }
+
+    @Test
     fun `buildMermaidGraph assigns positional ids and keeps qualified names only in labels`() {
         val nodes = listOf(
             GalleryNode("com.example.HomeRoute", "HomeRoute", "com.example", emptyList()),

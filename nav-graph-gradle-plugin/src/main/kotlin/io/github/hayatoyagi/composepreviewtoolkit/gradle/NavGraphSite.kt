@@ -339,12 +339,22 @@ data class SiteBuildInfo(
  * full SHA is still used to build the commit link. Both the commit and PR links are only rendered
  * when [SiteBuildInfo.githubRepository] is present — without it there's no repository to link
  * into, so the raw text is shown instead.
+ *
+ * Every field is HTML-escaped before interpolation, both in link text and inside `href`. In
+ * practice `commitSha`/`githubRepository` are CI-controlled (GitHub Actions' own SHA/repository
+ * env vars, not free text), but `branchName` is a PR's *source branch name*, which — unlike
+ * `commitSha`'s fixed hex-digit alphabet — git permits to contain `"`/`<`/`>`; an external
+ * contributor could otherwise break out of this static HTML's `href`/text via a crafted branch
+ * name. Escaping everything uniformly here means that never has to be reasoned about per-field,
+ * matching this file's existing never-trust-the-input convention (see `jsStringEscape`'s kdoc).
  */
 private fun buildBuildInfoFooterHtml(buildInfo: SiteBuildInfo?): String? {
     if (buildInfo == null) return null
-    val shortSha = buildInfo.commitSha.take(7)
-    val commitText = buildInfo.githubRepository?.let { repository ->
-        """<a href="https://github.com/$repository/commit/${buildInfo.commitSha}" target="_blank" rel="noopener">$shortSha</a>"""
+    val commitSha = buildInfo.commitSha.htmlEscape()
+    val shortSha = commitSha.take(7)
+    val repository = buildInfo.githubRepository?.htmlEscape()
+    val commitText = repository?.let {
+        """<a href="https://github.com/$it/commit/$commitSha" target="_blank" rel="noopener">$shortSha</a>"""
     } ?: shortSha
     val branchText = buildInfo.branchName
         ?.takeIf { it.isNotBlank() }
@@ -352,19 +362,22 @@ private fun buildBuildInfoFooterHtml(buildInfo: SiteBuildInfo?): String? {
         ?: ""
     val prText = buildInfo.prNumber?.let { prNumber ->
         val prLabel = "PR #$prNumber"
-        val prHtml = buildInfo.githubRepository?.let { repository ->
-            """<a href="https://github.com/$repository/pull/$prNumber" target="_blank" rel="noopener">$prLabel</a>"""
-        } ?: prLabel
+        val prHtml = repository?.let { """<a href="https://github.com/$it/pull/$prNumber" target="_blank" rel="noopener">$prLabel</a>""" } ?: prLabel
         " ($prHtml)"
     } ?: ""
     return "Built from commit $commitText$branchText$prText."
 }
 
-/** HTML-entity-escapes [this] for safe embedding as literal HTML body text (see [buildBuildInfoFooterHtml]). */
+/**
+ * HTML-entity-escapes [this] for safe embedding as literal HTML — both as body text and inside a
+ * double-quoted attribute value like `href="..."` (see [buildBuildInfoFooterHtml], which uses both)
+ * — so `"` is escaped too, not just the three characters that'd matter for body text alone.
+ */
 private fun String.htmlEscape(): String =
     replace("&", "&amp;")
         .replace("<", "&lt;")
         .replace(">", "&gt;")
+        .replace("\"", "&quot;")
 
 /**
  * Renders [nodes] + [mermaidGraph] as a single self-contained static HTML page. Earlier versions
