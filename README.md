@@ -158,7 +158,7 @@ See `ComposePreviewToolkitExtension.kt` for every available property, including 
 #### Composite GitHub Action
 
 ```yaml
-- uses: HayatoYagi/compose-preview-toolkit/.github/actions/update-validate-screenshot-tests@v0.3.0
+- uses: HayatoYagi/compose-preview-toolkit/.github/actions/update-validate-screenshot-tests@v1
   with:
     github-token: ${{ secrets.GITHUB_TOKEN }}
 ```
@@ -235,7 +235,7 @@ link to that exact line on GitHub — otherwise it's shown as plain, non-interac
 manages a persisted main site plus live per-PR previews on GitHub Pages:
 
 ```yaml
-- uses: HayatoYagi/compose-preview-toolkit/.github/actions/deploy-nav-graph-site@v0.3.0
+- uses: HayatoYagi/compose-preview-toolkit/.github/actions/deploy-nav-graph-site@v1
   with:
     site-task: ':app:generateDebugNavGraphSite'
     site-directory: 'app/build/composePreviewToolkit/navGraphSite/debug'
