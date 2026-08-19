@@ -1,27 +1,27 @@
 [versions]
 agp = "9.2.1"
-kotlin = "2.4.0"
+kotlin = "2.4.10"
 ksp = "2.3.9"
-compose = "1.11.4"
-screenshot = "0.0.1-alpha15"
+compose = "1.12.0"
+screenshot = "0.0.1-alpha16"
 android-compileSdk = "37"
 android-minSdk = "24"
 android-targetSdk = "37"
 androidx-activity = "1.13.0"
-material3 = "1.5.0-alpha23"
+material3 = "1.5.0-alpha26"
 # Verified by resolving against dl.google.com's maven-metadata.xml directly (not trusted from
 # memory, per this repo's "verify via real local builds" convention): these are the latest
 # *stable* (non -alphaXX/-betaXX/-rcXX) releases as of this writing. navigation3-runtime/-ui had
 # already moved past 1.1.4/1.1.1 (the versions a related-project's earlier research turned up) to
 # 1.1.5; lifecycle-viewmodel-navigation3 had moved past 2.10.0 to 2.11.0.
-navigation3-runtime = "1.1.5"
-navigation3-ui = "1.1.5"
+navigation3-runtime = "1.1.6"
+navigation3-ui = "1.1.6"
 lifecycle-viewmodel-navigation3 = "2.11.0"
 # The version currently under local development (see sample/settings.gradle.kts for why that's
 # permanently ahead of whatever's actually published) — resolves via mavenLocal() after running
 # the publish step described in the root README. Single source of truth for both plugin ids
 # below, bumped alongside the root gradle.properties `version=` by bump-version.yml.
-composePreviewToolkit = "0.4.0"
+composePreviewToolkit = "1.0.0"
 
 [libraries]
 compose-runtime = { module = "androidx.compose.runtime:runtime", version.ref = "compose" }
