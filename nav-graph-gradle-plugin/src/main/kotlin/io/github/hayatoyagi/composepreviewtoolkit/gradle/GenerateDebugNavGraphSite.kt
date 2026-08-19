@@ -186,11 +186,9 @@ abstract class GenerateDebugNavGraphSite @Inject constructor(
 
         val mermaidGraph = buildMermaidGraph(nodes = galleryNodes, edges = edges)
 
-        // CPT_BUILD_BRANCH/CPT_BUILD_PR_NUMBER are likewise set explicitly by the composite action
-        // (branch: pull_request.head.ref or the pushed ref's name; PR number: pull_request.number) —
-        // see that action's "Generate nav graph site" step. buildInfo is null only when githubSha
-        // itself couldn't be resolved (i.e. a local ./gradlew run with no CI env at all), since a
-        // build-info footer with no commit to show would be pointless.
+        // CPT_BUILD_BRANCH/CPT_BUILD_PR_NUMBER are likewise set by the composite action (see its
+        // "Generate nav graph site" step); null when githubSha itself is (a local ./gradlew run),
+        // since a build-info footer with no commit to show would be pointless.
         val buildInfo = githubSha?.let {
             SiteBuildInfo(
                 commitSha = it,

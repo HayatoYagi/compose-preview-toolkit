@@ -11,12 +11,9 @@ description: >-
   posts its sticky PR comment (that action's own — preview link plus QR code); on `pull_request:
   closed` it tears that preview down (skipping its own build step, since there's nothing to
   publish). Every build (both this mode and "build") also stamps the generated site itself with a
-  "Built from commit ..." footer line naming the commit/branch/PR it was built from, via the
-  CPT_BUILD_* env vars set on the Gradle step below — see GenerateDebugNavGraphSite's kdoc for why
-  that lives on the site rather than a PR comment (GITHUB_SHA alone can't safely provide it: on
-  `pull_request` runs it's GitHub's own test-merge commit, not the commit actually pushed). Any
-  other event type under "github-pages" mode fails fast, since it almost always means the calling
-  workflow's trigger is misconfigured.
+  "Built from commit ..." footer naming the commit/branch/PR it was built from. Any other event
+  type under "github-pages" mode fails fast, since it almost always means the calling workflow's
+  trigger is misconfigured.
 author: 'HayatoYagi'
 
 inputs:
@@ -114,12 +111,9 @@ runs:
       if: github.event.action != 'closed'
       shell: bash
       working-directory: ${{ inputs.working-directory }}
-      # CPT_BUILD_SHA is deliberately pull_request.head.sha (not the ambient GITHUB_SHA, which on a
-      # pull_request run is GitHub's own ephemeral test-merge commit) so GenerateDebugNavGraphSite's
-      # "Built from commit ..." site footer — and its source-view links — name the commit a
-      # contributor actually pushed. On `push` github.sha already is the real head commit, so no
-      # such mismatch exists there. CPT_BUILD_BRANCH/CPT_BUILD_PR_NUMBER are unset (empty) outside
-      # mode "github-pages"/pull_request, which GenerateDebugNavGraphSite treats as "omit".
+      # CPT_BUILD_SHA is pull_request.head.sha rather than the ambient GITHUB_SHA on PR runs — see
+      # GenerateDebugNavGraphSite.generate()'s kdoc for why. CPT_BUILD_PR_NUMBER is '' outside
+      # pull_request, which that same task treats as "no PR to show".
       run: ./gradlew ${{ inputs.site-task }} ${{ inputs.gradle-args }}
       env:
         CPT_BUILD_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
