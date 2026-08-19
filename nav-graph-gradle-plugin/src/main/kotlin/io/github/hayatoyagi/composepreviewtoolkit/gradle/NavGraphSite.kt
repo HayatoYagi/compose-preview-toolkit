@@ -313,6 +313,73 @@ private fun String.mermaidLabel(): String =
         .replace(">", "&gt;")
 
 /**
+ * Provenance of the CI run that produced a given site build, shown in [buildGallerySiteHtml]'s
+ * footer so a viewer (of a PR preview *or* the persisted main site) can tell which commit — and,
+ * for a PR preview, which branch/PR — the page in front of them was actually built from, without
+ * needing to go find a PR comment for it.
+ *
+ * [commitSha] is deliberately the actual built commit, not whatever `GITHUB_SHA` happens to be:
+ * for a `pull_request` event, `GITHUB_SHA` is the *merge commit* GitHub Actions test-merges into
+ * the base branch, not the commit that was actually pushed — showing that would silently mismatch
+ * what a contributor sees in their own branch history. Callers (`GenerateDebugNavGraphSite`) are
+ * responsible for resolving the right value (e.g. `pull_request.head.sha` on PR runs).
+ */
+data class SiteBuildInfo(
+    val commitSha: String,
+    val githubRepository: String? = null,
+    val branchName: String? = null,
+    val prNumber: Int? = null,
+)
+
+/**
+ * Renders [buildInfo] as the inner HTML of a "Built from ..." footer line, or `null` when
+ * [buildInfo] itself is `null` (e.g. a local `./gradlew` run with no CI env vars to source it
+ * from) — mirroring [buildSourceLink]'s same best-effort, never-guess approach. [SiteBuildInfo.commitSha]
+ * is shortened to 7 characters for display (matching GitHub's own short-SHA convention) but the
+ * full SHA is still used to build the commit link. Both the commit and PR links are only rendered
+ * when [SiteBuildInfo.githubRepository] is present — without it there's no repository to link
+ * into, so the raw text is shown instead.
+ *
+ * Every field is HTML-escaped before interpolation, both in link text and inside `href`. In
+ * practice `commitSha`/`githubRepository` are CI-controlled (GitHub Actions' own SHA/repository
+ * env vars, not free text), but `branchName` is a PR's *source branch name*, which — unlike
+ * `commitSha`'s fixed hex-digit alphabet — git permits to contain `"`/`<`/`>`; an external
+ * contributor could otherwise break out of this static HTML's `href`/text via a crafted branch
+ * name. Escaping everything uniformly here means that never has to be reasoned about per-field,
+ * matching this file's existing never-trust-the-input convention (see `jsStringEscape`'s kdoc).
+ */
+private fun buildBuildInfoFooterHtml(buildInfo: SiteBuildInfo?): String? {
+    if (buildInfo == null) return null
+    val commitSha = buildInfo.commitSha.htmlEscape()
+    val shortSha = commitSha.take(7)
+    val repository = buildInfo.githubRepository?.htmlEscape()
+    val commitText = repository?.let {
+        """<a href="https://github.com/$it/commit/$commitSha" target="_blank" rel="noopener">$shortSha</a>"""
+    } ?: shortSha
+    val branchText = buildInfo.branchName
+        ?.takeIf { it.isNotBlank() }
+        ?.let { branchName -> " on branch <code>${branchName.htmlEscape()}</code>" }
+        ?: ""
+    val prText = buildInfo.prNumber?.let { prNumber ->
+        val prLabel = "PR #$prNumber"
+        val prHtml = repository?.let { """<a href="https://github.com/$it/pull/$prNumber" target="_blank" rel="noopener">$prLabel</a>""" } ?: prLabel
+        " ($prHtml)"
+    } ?: ""
+    return "Built from commit $commitText$branchText$prText."
+}
+
+/**
+ * HTML-entity-escapes [this] for safe embedding as literal HTML — both as body text and inside a
+ * double-quoted attribute value like `href="..."` (see [buildBuildInfoFooterHtml], which uses both)
+ * — so `"` is escaped too, not just the three characters that'd matter for body text alone.
+ */
+private fun String.htmlEscape(): String =
+    replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace("\"", "&quot;")
+
+/**
  * Renders [nodes] + [mermaidGraph] as a single self-contained static HTML page. Earlier versions
  * of this gallery rendered two visually separate sections — a Mermaid graph of plain-text nodes,
  * and a separate thumbnail-card grid below it — deliberately kept apart because embedding
@@ -340,12 +407,18 @@ private fun String.mermaidLabel(): String =
  * keeping the whole page one file. Thumbnails are embedded inline as base64 data URIs rather than
  * copied alongside `index.html` as separate files, so the whole site is exactly one file — simpler
  * to review/host for a gallery than keeping an `index.html` + PNGs directory in sync.
+ *
+ * [buildInfo], when non-null, adds a second footer line naming the commit (and, for a PR preview,
+ * branch/PR) the page was built from — see [SiteBuildInfo]/[buildBuildInfoFooterHtml]. `null` (the
+ * default) omits that line entirely, e.g. for a local `./gradlew` run with no CI provenance to show.
  */
 fun buildGallerySiteHtml(
     nodes: List<GalleryNode>,
     mermaidGraph: String,
+    buildInfo: SiteBuildInfo? = null,
 ): String {
     val galleryDataJson = nodes.withIndex().joinToString(",\n") { (index, node) -> node.toJsDataEntry("n$index") }
+    val buildInfoFooterHtml = buildBuildInfoFooterHtml(buildInfo)
     return """
         <!DOCTYPE html>
         <html lang="en">
@@ -400,7 +473,7 @@ fun buildGallerySiteHtml(
         <div id="cpt-modal-images" class="modal-images"></div>
         </div>
         </div>
-        <footer class="cpt-footer">Generated by <a href="https://github.com/HayatoYagi/compose-preview-toolkit" target="_blank" rel="noopener">compose-preview-toolkit</a></footer>
+        <footer class="cpt-footer">Generated by <a href="https://github.com/HayatoYagi/compose-preview-toolkit" target="_blank" rel="noopener">compose-preview-toolkit</a>${if (buildInfoFooterHtml != null) "<br>$buildInfoFooterHtml" else ""}</footer>
         <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
         <script>
         const cptGalleryData = {

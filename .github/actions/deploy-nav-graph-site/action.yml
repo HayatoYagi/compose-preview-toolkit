@@ -8,9 +8,12 @@ description: >-
   multiple steps or workflows: on `push` it deploys the built site as the persisted main site
   (branch-based deploy to pages-branch's root); on `pull_request`
   (opened/reopened/synchronize) it deploys a live per-PR preview via rossjrw/pr-preview-action and
-  posts a sticky PR comment; on `pull_request: closed` it tears that preview down (skipping its
-  own build step, since there's nothing to publish). Any other event type under "github-pages"
-  mode fails fast, since it almost always means the calling workflow's trigger is misconfigured.
+  posts its sticky PR comment (that action's own — preview link plus QR code); on `pull_request:
+  closed` it tears that preview down (skipping its own build step, since there's nothing to
+  publish). Every build (both this mode and "build") also stamps the generated site itself with a
+  "Built from commit ..." footer naming the commit/branch/PR it was built from. Any other event
+  type under "github-pages" mode fails fast, since it almost always means the calling workflow's
+  trigger is misconfigured.
 author: 'HayatoYagi'
 
 inputs:
@@ -108,7 +111,14 @@ runs:
       if: github.event.action != 'closed'
       shell: bash
       working-directory: ${{ inputs.working-directory }}
+      # CPT_BUILD_SHA is pull_request.head.sha rather than the ambient GITHUB_SHA on PR runs — see
+      # GenerateDebugNavGraphSite.generate()'s kdoc for why. CPT_BUILD_PR_NUMBER is '' outside
+      # pull_request, which that same task treats as "no PR to show".
       run: ./gradlew ${{ inputs.site-task }} ${{ inputs.gradle-args }}
+      env:
+        CPT_BUILD_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+        CPT_BUILD_BRANCH: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.ref || github.ref_name }}
+        CPT_BUILD_PR_NUMBER: ${{ github.event_name == 'pull_request' && github.event.pull_request.number || '' }}
 
     - name: Deploy main site to GitHub Pages
       if: inputs.mode == 'github-pages' && github.event_name == 'push'

@@ -151,7 +151,16 @@ abstract class GenerateDebugNavGraphSite @Inject constructor(
         // existing split of "pure/testable HTML generation" (NavGraphSite.kt) from "env/file reads"
         // (this task). See buildSourceLink's kdoc for the full gating logic.
         val githubRepository = System.getenv("GITHUB_REPOSITORY")
-        val githubSha = System.getenv("GITHUB_SHA")
+
+        // CPT_BUILD_SHA is set explicitly by deploy-nav-graph-site's composite action (to
+        // pull_request.head.sha on PR runs) rather than relying on GITHUB_SHA directly: for a
+        // pull_request event GITHUB_SHA is GitHub Actions' own ephemeral *test-merge* commit, not
+        // the commit that was actually pushed — using it here would point both buildSourceLink's
+        // "view source" links and the site's own build-info footer (see SiteBuildInfo below) at a
+        // commit a contributor's own branch history doesn't contain. Falling back to GITHUB_SHA
+        // covers a local ./gradlew run (both env vars absent, so this stays null) and a push run,
+        // where GITHUB_SHA already *is* the real head commit.
+        val githubSha = System.getenv("CPT_BUILD_SHA") ?: System.getenv("GITHUB_SHA")
 
         // entries is already deduplicated by qualifiedName and sorted (see buildGalleryEntries),
         // which is exactly the deterministic node ordering buildMermaidGraph/buildGallerySiteHtml
@@ -177,9 +186,21 @@ abstract class GenerateDebugNavGraphSite @Inject constructor(
 
         val mermaidGraph = buildMermaidGraph(nodes = galleryNodes, edges = edges)
 
+        // CPT_BUILD_BRANCH/CPT_BUILD_PR_NUMBER are likewise set by the composite action (see its
+        // "Generate nav graph site" step); null when githubSha itself is (a local ./gradlew run),
+        // since a build-info footer with no commit to show would be pointless.
+        val buildInfo = githubSha?.let {
+            SiteBuildInfo(
+                commitSha = it,
+                githubRepository = githubRepository,
+                branchName = System.getenv("CPT_BUILD_BRANCH"),
+                prNumber = System.getenv("CPT_BUILD_PR_NUMBER")?.toIntOrNull(),
+            )
+        }
+
         val outputDir = outputDirectory.get().asFile
         outputDir.deleteRecursively()
         outputDir.mkdirs()
-        outputDir.resolve("index.html").writeText(buildGallerySiteHtml(galleryNodes, mermaidGraph))
+        outputDir.resolve("index.html").writeText(buildGallerySiteHtml(galleryNodes, mermaidGraph, buildInfo))
     }
 }
