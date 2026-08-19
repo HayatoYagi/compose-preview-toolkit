@@ -8,13 +8,15 @@ description: >-
   multiple steps or workflows: on `push` it deploys the built site as the persisted main site
   (branch-based deploy to pages-branch's root); on `pull_request`
   (opened/reopened/synchronize) it deploys a live per-PR preview via rossjrw/pr-preview-action and
-  posts/updates a sticky PR comment naming the preview URL and the head commit it was built from
-  (rossjrw/pr-preview-action's own comment has no such customization point, so this action posts
-  its own via peter-evans/find-comment + create-or-update-comment instead); on `pull_request:
+  posts its sticky PR comment (that action's own — preview link plus QR code); on `pull_request:
   closed` it tears that preview down (skipping its own build step, since there's nothing to
-  publish) and updates the same sticky comment to say so. Any other event type under
-  "github-pages" mode fails fast, since it almost always means the calling workflow's trigger is
-  misconfigured.
+  publish). Every build (both this mode and "build") also stamps the generated site itself with a
+  "Built from commit ..." footer line naming the commit/branch/PR it was built from, via the
+  CPT_BUILD_* env vars set on the Gradle step below — see GenerateDebugNavGraphSite's kdoc for why
+  that lives on the site rather than a PR comment (GITHUB_SHA alone can't safely provide it: on
+  `pull_request` runs it's GitHub's own test-merge commit, not the commit actually pushed). Any
+  other event type under "github-pages" mode fails fast, since it almost always means the calling
+  workflow's trigger is misconfigured.
 author: 'HayatoYagi'
 
 inputs:
@@ -112,7 +114,17 @@ runs:
       if: github.event.action != 'closed'
       shell: bash
       working-directory: ${{ inputs.working-directory }}
+      # CPT_BUILD_SHA is deliberately pull_request.head.sha (not the ambient GITHUB_SHA, which on a
+      # pull_request run is GitHub's own ephemeral test-merge commit) so GenerateDebugNavGraphSite's
+      # "Built from commit ..." site footer — and its source-view links — name the commit a
+      # contributor actually pushed. On `push` github.sha already is the real head commit, so no
+      # such mismatch exists there. CPT_BUILD_BRANCH/CPT_BUILD_PR_NUMBER are unset (empty) outside
+      # mode "github-pages"/pull_request, which GenerateDebugNavGraphSite treats as "omit".
       run: ./gradlew ${{ inputs.site-task }} ${{ inputs.gradle-args }}
+      env:
+        CPT_BUILD_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+        CPT_BUILD_BRANCH: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.ref || github.ref_name }}
+        CPT_BUILD_PR_NUMBER: ${{ github.event_name == 'pull_request' && github.event.pull_request.number || '' }}
 
     - name: Deploy main site to GitHub Pages
       if: inputs.mode == 'github-pages' && github.event_name == 'push'
@@ -143,32 +155,3 @@ runs:
         source-dir: ${{ inputs.site-directory }}
         preview-branch: ${{ inputs.pages-branch }}
         umbrella-dir: ${{ inputs.pr-preview-umbrella-dir }}
-        # The action's own sticky comment has no template/customization input — it's always just
-        # the preview link (plus an optional QR code), with no way to show which commit it was
-        # built from. Disable it and post our own comment below instead.
-        comment: false
-
-    # rossjrw/pr-preview-action's sticky comment can't be customized to show the commit it was
-    # built from, so find-comment + create-or-update-comment (keyed on the marker below) recreates
-    # the same "sticky" behavior — one comment per PR, edited in place — with commit info added.
-    - name: Find existing preview comment
-      if: inputs.mode == 'github-pages' && github.event_name == 'pull_request'
-      id: find-comment
-      uses: peter-evans/find-comment@v3
-      with:
-        token: ${{ inputs.github-token }}
-        issue-number: ${{ github.event.pull_request.number }}
-        comment-author: 'github-actions[bot]'
-        body-includes: '<!-- pr-preview-comment -->'
-
-    - name: Post or update PR preview comment
-      if: inputs.mode == 'github-pages' && github.event_name == 'pull_request'
-      uses: peter-evans/create-or-update-comment@v4
-      with:
-        token: ${{ inputs.github-token }}
-        issue-number: ${{ github.event.pull_request.number }}
-        comment-id: ${{ steps.find-comment.outputs.comment-id }}
-        edit-mode: replace
-        body: |
-          <!-- pr-preview-comment -->
-          ${{ github.event.action != 'closed' && format('🚀 Preview deployed to <{0}> — built from commit `{1}`.', steps.pr-preview.outputs.preview-url, github.event.pull_request.head.sha) || format('🗑️ Preview removed (PR closed at commit `{0}`).', github.event.pull_request.head.sha) }}
