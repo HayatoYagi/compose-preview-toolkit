@@ -89,11 +89,14 @@ class ComposePreviewToolkitNavGraphPlugin : Plugin<Project> {
             task.edgeSourceFiles.from(
                 Callable {
                     graphModules.map { path ->
-                        target.project(path).layout.projectDirectory.dir("src/main/kotlin").asFileTree
+                        target.project(path).isolated.projectDirectory.dir("src/main/kotlin").asFileTree
                             .matching { filter -> filter.include("**/*.kt") }
                     }
                 },
             )
+            // Unlike edgeSourceFiles/screenshotReferenceImages above, this can't be migrated to
+            // Project.isolated — IsolatedProject exposes projectDirectory but not buildDirectory.
+            // Still Isolated-Projects-incompatible; see HayatoYagi/compose-preview-toolkit#57.
             task.screenshotIndexFiles.from(
                 Callable {
                     graphModules.map { path ->
@@ -109,13 +112,14 @@ class ComposePreviewToolkitNavGraphPlugin : Plugin<Project> {
             task.screenshotReferenceImages.from(
                 Callable {
                     graphModules.map { path ->
-                        target.project(path).layout.projectDirectory.dir("src/screenshotTestDebug/reference")
+                        target.project(path).isolated.projectDirectory.dir("src/screenshotTestDebug/reference")
                             .asFileTree.matching { filter -> filter.include("**/*.png") }
                     }
                 },
             )
             // Only graph modules that apply the screenshot-testing plugin have a kspDebugKotlin
-            // task to depend on.
+            // task to depend on. No Isolated-Projects-safe way to check another project's tasks/
+            // pluginManager exists yet; see HayatoYagi/compose-preview-toolkit#57.
             task.dependsOn(
                 Callable {
                     graphModules.mapNotNull { path ->
