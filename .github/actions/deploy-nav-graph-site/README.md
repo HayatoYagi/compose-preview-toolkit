@@ -71,12 +71,12 @@ jobs:
       # update-validate-screenshot-tests is shown here as a concrete, runnable example.
       - name: Update screenshot baselines
         if: github.event_name != 'pull_request' || github.event.action != 'closed'
-        uses: HayatoYagi/compose-preview-toolkit/.github/actions/update-validate-screenshot-tests@v1.0.0
+        uses: HayatoYagi/compose-preview-toolkit/.github/actions/update-validate-screenshot-tests@v1
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           skip-validate: 'true'
 
-      - uses: HayatoYagi/compose-preview-toolkit/.github/actions/deploy-nav-graph-site@v1.0.0
+      - uses: HayatoYagi/compose-preview-toolkit/.github/actions/deploy-nav-graph-site@v1
         with:
           site-task: ':app:generateDebugNavGraphSite'
           site-directory: 'app/build/composePreviewToolkit/navGraphSite/debug'

@@ -34,7 +34,7 @@ jobs:
           fetch-depth: 0
 
       - name: Update baselines and validate
-        uses: HayatoYagi/compose-preview-toolkit/.github/actions/update-validate-screenshot-tests@v1.0.0
+        uses: HayatoYagi/compose-preview-toolkit/.github/actions/update-validate-screenshot-tests@v1
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           working-directory: sample
@@ -52,4 +52,3 @@ Common options:
 - `gradle-args`: pass extra args to both Gradle tasks
 - `skip-validate`: set to `"true"` to only update baselines
 - `push-ref`: override target branch ref for the auto-commit push
-
